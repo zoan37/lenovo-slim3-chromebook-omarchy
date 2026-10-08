@@ -1,0 +1,6 @@
+#!/bin/bash
+# usage: cb 'shell commands'   -> runs on the Chromebook as root, prints output
+D=$(dirname "$(readlink -f "$0")"); n=$(( $(ls $D/q $D/out 2>/dev/null | grep -oE '^[0-9]+' | sort -n | tail -1) + 1 ))
+printf '%s\n' "$1" > $D/q/$n.sh.tmp && mv $D/q/$n.sh.tmp $D/q/$n.sh
+for i in $(seq 1 ${CB_WAIT:-600}); do [ -f $D/out/$n.txt ] && { cat $D/out/$n.txt; exit 0; }; sleep 1; done
+echo "timeout waiting for #$n"; exit 1
