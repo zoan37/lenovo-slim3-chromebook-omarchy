@@ -1,0 +1,12 @@
+#!/bin/bash
+# ChromeOS's cgpt (kernel-partition priority/tries/successful attributes), run with ChromeOS's own loader and libs
+# copied to /opt/quigon-cros-tools, so the ChromeOS partition doesn't have to stay mounted (re-reading the partition table
+# needs every partition on the disk unmounted). Populate with: quigon-cgpt --install-from /mnt/cros
+T=/opt/quigon-cros-tools
+if [[ ${1:-} == --install-from ]]; then
+  R=${2:?ChromeOS root}; install -d $T/bin $T/lib
+  install -m755 "$R/usr/bin/cgpt" $T/bin/
+  for l in ld-linux-aarch64.so.1 libc.so.6 libuuid.so.1; do cp -L "$(ls "$R"/lib64/$l "$R"/usr/lib64/$l 2>/dev/null | head -1)" $T/lib/; done
+  exit 0
+fi
+exec $T/lib/ld-linux-aarch64.so.1 --library-path $T/lib $T/bin/cgpt "$@"

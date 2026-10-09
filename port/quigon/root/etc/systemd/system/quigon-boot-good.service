@@ -1,0 +1,10 @@
+[Unit]
+Description=Mark the internal Omarchy kernel (KERN-C) good once it has booted
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/boot-good
+
+[Install]
+WantedBy=multi-user.target
