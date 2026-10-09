@@ -1,0 +1,11 @@
+#!/bin/bash
+# Run an Electron/Chromium app on the Mali-G57 the way quigon-chrome runs Chrome: ANGLE GLES on ChromeOS's libmali
+# (egl-mali-shim as libEGL.so.1) + ChromeOS minigbm, from /opt/quigon-gpu/chrome-lib. The app still needs
+# --use-gl=angle --use-angle=gles (its flags file, e.g. ~/.config/grok-bot-flags.conf) and must not disable
+# hardware acceleration itself. Usage: quigon-electron <launcher> [args...]. No-op without /etc/quigon/gpu.env.
+if [[ -f /etc/quigon/gpu.env && -e /opt/quigon-gpu/chrome-lib/libEGL.so.1 ]]; then
+  export LD_LIBRARY_PATH=/opt/quigon-gpu/chrome-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export QUIGON_EGL_SHIM_EXE=none
+  unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE
+fi
+exec "$@"
