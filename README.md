@@ -23,7 +23,7 @@ Experimental device port, not an installer.
 | Display (mediatek-drm KMS) | Hyprland drives eDP-1 at 1920×1200@60 |
 | Audio, Bluetooth, battery | Audio card `mt8189_1019_rt5682s` probes; BT `hci0` up; battery reads (`sbs-battery`) — not tested further |
 | Hyprland + Omarchy | **Works**: Omarchy 4.0.4 (official aarch64 `edge` packages), uwsm session on seat0, NetworkManager: [notes/desktop-20261008.md](notes/desktop-20261008.md) |
-| GPU (Mali-G57 on kbase r54p1) | **Compositor on the GPU** via ChromeOS's own `libmali` r54p1 + a RELR patch + an EGL shim: [notes/gpu-20261008.md](notes/gpu-20261008.md). Apps still on llvmpipe |
+| GPU (Mali-G57 on kbase r54p1) | **On the GPU**: Hyprland and Chrome on ChromeOS's own `libmali` GLES (RELR patch + EGL shim, + minigbm for Chrome); GTK 4 apps on libmali Vulkan via a patched ARM vulkan-wsi-layer; other OpenGL apps via Zink; Ghostty via a patched private Zink. [notes/gpu-20261008.md](notes/gpu-20261008.md) |
 
 ## Layout
 

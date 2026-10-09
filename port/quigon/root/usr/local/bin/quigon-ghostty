@@ -1,0 +1,15 @@
+#!/bin/bash
+# Ghostty on the Mali-G57: a private Mesa (/opt/quigon-gpu/mesa-zink, zink only, patched to keep read-only vertex
+# SSBOs) on the Mali Vulkan driver, with GL 4.3 reported (Ghostty's minimum; what Zink can't do here, fp64 and
+# multi-draw-indirect, Ghostty doesn't use). ghostty-gpu-preload.so adds dmabuf,offload to Ghostty's GDK_DISABLE and
+# strips these variables from what Ghostty execs. Without /etc/quigon/gpu.env it runs Ghostty unchanged (llvmpipe).
+M=/opt/quigon-gpu/mesa-zink
+if [[ -f /etc/quigon/gpu.env && -e $M/lib/libgallium-26.2.4.so ]]; then
+  unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE
+  export __EGL_VENDOR_LIBRARY_FILENAMES=$M/share/glvnd/egl_vendor.d/50_mesa.json
+  export LD_LIBRARY_PATH=$M/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export LD_PRELOAD=/opt/quigon-gpu/lib/ghostty-gpu-preload.so${LD_PRELOAD:+:$LD_PRELOAD}
+  export MESA_LOADER_DRIVER_OVERRIDE=zink MESA_GL_VERSION_OVERRIDE=4.3 MESA_GLSL_VERSION_OVERRIDE=430
+  export QUIGON_ZINK_RO_VERTEX_SSBO=1
+fi
+exec /usr/bin/ghostty "$@"
