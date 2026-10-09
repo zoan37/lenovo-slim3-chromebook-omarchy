@@ -1,0 +1,112 @@
+diff --git a/drivers/clk/mediatek/Kconfig b/drivers/clk/mediatek/Kconfig
+index 244251ae1..87e622270 100644
+--- a/drivers/clk/mediatek/Kconfig
++++ b/drivers/clk/mediatek/Kconfig
+@@ -883,6 +883,12 @@ config COMMON_CLK_MT8189_IIC
+ 	  the MT8189 chipset, improving the overall performance and power
+ 	  efficiency of the device.
+ 
++config COMMON_CLK_MT8189_MFG
++	tristate "Clock driver for MediaTek MT8189 GPU (mfgcfg)"
++	depends on COMMON_CLK_MT8189
++	help
++	  Clock driver for the MT8189 GPU (MFG) subsystem.
++
+ config COMMON_CLK_MT8189_SCP
+ 	tristate "Clock driver for MediaTek MT8189 scp"
+ 	depends on COMMON_CLK_MT8189
+diff --git a/drivers/clk/mediatek/Makefile b/drivers/clk/mediatek/Makefile
+index a0bba466b..a0631a178 100644
+--- a/drivers/clk/mediatek/Makefile
++++ b/drivers/clk/mediatek/Makefile
+@@ -130,6 +130,7 @@ obj-$(CONFIG_COMMON_CLK_MT8189_BUS) += clk-mt8189-bus.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_DBGAO) += clk-mt8189-dbgao.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_DVFSRC) += clk-mt8189-dvfsrc.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_IIC) += clk-mt8189-iic.o
++obj-$(CONFIG_COMMON_CLK_MT8189_MFG) += clk-mt8189-mfg.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_SCP) += clk-mt8189-scp.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_UFS) += clk-mt8189-ufs.o
+ obj-$(CONFIG_COMMON_CLK_MT8192) += clk-mt8192-apmixedsys.o clk-mt8192.o
+diff --git a/drivers/clk/mediatek/clk-mt8189-mfg.c b/drivers/clk/mediatek/clk-mt8189-mfg.c
+new file mode 100644
+index 000000000..3e648de1e
+--- /dev/null
++++ b/drivers/clk/mediatek/clk-mt8189-mfg.c
+@@ -0,0 +1,53 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * MediaTek MT8189 GPU (MFG) clock: the BG3D gate in mfgcfg, fed by the MFG PLL mux.
++ * Modelled on clk-mt8188-mfg.c; the gate layout matches ChromeOS's clk-mt8189-mfg.c.
++ */
++
++#include <dt-bindings/clock/mediatek,mt8189-clk.h>
++#include <linux/clk-provider.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++
++#include "clk-gate.h"
++#include "clk-mtk.h"
++
++static const struct mtk_gate_regs mfgcfg_cg_regs = {
++	.set_ofs = 0x4,
++	.clr_ofs = 0x8,
++	.sta_ofs = 0x0,
++};
++
++#define GATE_MFG(_id, _name, _parent, _shift)				\
++	GATE_MTK_FLAGS(_id, _name, _parent, &mfgcfg_cg_regs, _shift,	\
++		       &mtk_clk_gate_ops_setclr, CLK_SET_RATE_PARENT)
++
++static const struct mtk_gate mfgcfg_clks[] = {
++	GATE_MFG(CLK_MFG_BG3D, "mfg_bg3d", "mfg_sel_mfgpll", 0),
++};
++
++static const struct mtk_clk_desc mfgcfg_desc = {
++	.clks = mfgcfg_clks,
++	.num_clks = ARRAY_SIZE(mfgcfg_clks),
++	/* registers live in the MFG power domain: power it for every access */
++	.need_runtime_pm = true,
++};
++
++static const struct of_device_id of_match_clk_mt8189_mfgcfg[] = {
++	{ .compatible = "mediatek,mt8189-mfgcfg", .data = &mfgcfg_desc },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, of_match_clk_mt8189_mfgcfg);
++
++static struct platform_driver clk_mt8189_mfgcfg_drv = {
++	.probe = mtk_clk_simple_probe,
++	.remove = mtk_clk_simple_remove,
++	.driver = {
++		.name = "clk-mt8189-mfgcfg",
++		.of_match_table = of_match_clk_mt8189_mfgcfg,
++	},
++};
++module_platform_driver(clk_mt8189_mfgcfg_drv);
++
++MODULE_DESCRIPTION("MediaTek MT8189 GPU mfg clocks driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/panfrost/panfrost_drv.c b/drivers/gpu/drm/panfrost/panfrost_drv.c
+index 70c05210e..5a44b7ca0 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_drv.c
++++ b/drivers/gpu/drm/panfrost/panfrost_drv.c
+@@ -1177,6 +1177,7 @@ static const struct of_device_id dt_match[] = {
+ 	{ .compatible = "mediatek,mt8186-mali", .data = &mediatek_mt8186_data },
+ 	{ .compatible = "mediatek,mt8188-mali", .data = &mediatek_mt8188_data },
+ 	{ .compatible = "mediatek,mt8192-mali", .data = &mediatek_mt8192_data },
++	{ .compatible = "mediatek,mt8189-mali", .data = &mediatek_mt8370_data },
+ 	{ .compatible = "mediatek,mt8370-mali", .data = &mediatek_mt8370_data },
+ 	{ .compatible = "allwinner,sun50i-h616-mali", .data = &default_pm_rt_data },
+ 	{}
+diff --git a/include/dt-bindings/clock/mediatek,mt8189-clk.h b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+index ca433f969..fe37441e9 100644
+--- a/include/dt-bindings/clock/mediatek,mt8189-clk.h
++++ b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+@@ -430,4 +430,7 @@
+ #define CLK_DEM_BUSCLK_EN				1
+ #define CLK_DEM_SYSCLK_EN				2
+ 
++/* MFGCFG */
++#define CLK_MFG_BG3D					0
++
+ #endif /* _DT_BINDINGS_CLK_MT8189_H */

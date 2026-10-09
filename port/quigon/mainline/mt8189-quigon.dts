@@ -5,6 +5,8 @@
  *
  * mt8189-pinfunc.h is ChromeOS's (the mainline pinmux header patch isn't merged yet).
  *
+ * Stage 3 (GPU): MFG clock + power domains + Panfrost node (OPPs limited to the lowest six for bring-up).
+ *
  * Stage 1: CPUs, GIC, timer, clocks, pinctrl, power domains, watchdog, PCIe + MT7921 Wi-Fi, MT6359 PMIC (on the pwrap; MT6319 on SPMI for
  * the big cores isn't described yet, firmware sets it up). No UART is reachable without a SuzyQ cable,
  * so the console goes to ramoops (pstore), which the firmware describes in /reserved-memory on every boot. The
@@ -14,6 +16,7 @@
 #include "mt8189.dtsi"
 #include "mt6359.dtsi"
 #include "mt8189-pinfunc.h"
+#include <dt-bindings/clock/mediatek,mt8189-clk.h>
 
 / {
 	model = "Google Quigon (Lenovo IdeaPad Slim 3 Chromebook)";
@@ -47,7 +50,67 @@
 		};
 	};
 
+	/* Bring-up: the lowest six of ChromeOS's GPU OPPs (390-560 MHz, <= 693.75 mV). */
+	gpu_opp_table: opp-table-gpu {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-390000000 {
+			opp-hz = /bits/ 64 <390000000>;
+			opp-microvolt = <675000>;
+		};
+		opp-424000000 {
+			opp-hz = /bits/ 64 <424000000>;
+			opp-microvolt = <681250>;
+		};
+		opp-458000000 {
+			opp-hz = /bits/ 64 <458000000>;
+			opp-microvolt = <681250>;
+		};
+		opp-492000000 {
+			opp-hz = /bits/ 64 <492000000>;
+			opp-microvolt = <687500>;
+		};
+		opp-526000000 {
+			opp-hz = /bits/ 64 <526000000>;
+			opp-microvolt = <687500>;
+		};
+		opp-560000000 {
+			opp-hz = /bits/ 64 <560000000>;
+			opp-microvolt = <693750>;
+		};
+	};
+
 	soc {
+		/* Mali-G57 MC2 (Valhall JM), from ChromeOS; Panfrost treats it like the MT8370's (2 power domains). */
+		gpu: gpu@13000000 {
+			compatible = "mediatek,mt8189-mali", "arm,mali-valhall-jm";
+			reg = <0 0x13000000 0 0x4000>;
+			interrupts = <GIC_SPI 271 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 270 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 269 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "job", "mmu", "gpu";
+			clocks = <&mfgcfg CLK_MFG_BG3D>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_MFG2>,
+					<&spm MT8189_POWER_DOMAIN_MFG3>;
+			power-domain-names = "core0", "core1";
+			operating-points-v2 = <&gpu_opp_table>;
+			mali-supply = <&mt6359_vproc1_buck_reg>;
+			#cooling-cells = <2>;
+		};
+
+		/*
+		 * GPU clock gates. The registers sit inside the MFG power domain: reading the gate state with it off is a
+		 * bus error (SError panic seen when reading clk_summary), so tie the controller to the domain (the driver
+		 * uses runtime PM).
+		 */
+		mfgcfg: clock-controller@13fbf000 {
+			compatible = "mediatek,mt8189-mfgcfg";
+			reg = <0 0x13fbf000 0 0x1000>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_MFG1>;
+			#clock-cells = <1>;
+		};
+
 		watchdog: watchdog@1c00a000 {
 			compatible = "mediatek,mt8189-wdt", "mediatek,mt6589-wdt";
 			reg = <0 0x1c00a000 0 0x1000>;
@@ -93,6 +156,55 @@
 	 */
 	compatible = "mediatek,mt8189-tphy", "mediatek,generic-tphy-v2";
 	status = "okay";
+};
+
+/* GPU power domains (not in the Genio series' mt8189.dtsi): MFG0 > MFG1 > MFG2, MFG3, like MT8188, with ChromeOS's
+ * supplies (mfg0: vproc1 = GPU core rail, mfg1: vsram_proc1 = GPU SRAM rail) and MFG clocks. */
+&spm {
+	mfg0: power-domain@MT8189_POWER_DOMAIN_MFG0 {
+		reg = <MT8189_POWER_DOMAIN_MFG0>;
+		domain-supply = <&mt6359_vproc1_buck_reg>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#power-domain-cells = <1>;
+
+		mfg1: power-domain@MT8189_POWER_DOMAIN_MFG1 {
+			reg = <MT8189_POWER_DOMAIN_MFG1>;
+			clocks = <&apmixedsys CLK_APMIXED_MFGPLL>,
+				 <&topckgen CLK_TOP_MFG_REF_SEL>;
+			clock-names = "mfg", "alt";
+			domain-supply = <&mt6359_vsram_proc1_ldo_reg>;
+			mediatek,infracfg = <&infra_ao>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			#power-domain-cells = <1>;
+
+			power-domain@MT8189_POWER_DOMAIN_MFG2 {
+				reg = <MT8189_POWER_DOMAIN_MFG2>;
+				#power-domain-cells = <0>;
+			};
+
+			power-domain@MT8189_POWER_DOMAIN_MFG3 {
+				reg = <MT8189_POWER_DOMAIN_MFG3>;
+				#power-domain-cells = <0>;
+			};
+		};
+	};
+};
+
+/*
+ * ChromeOS skywalker: GPU core and SRAM rails. ChromeOS couples them; mainline's mtk-regulator-coupler rejects these
+ * (vproc1: "failed to get coupler: -ENOTSUPP", which fails the whole MT6359 regulator probe), so no coupling for now:
+ * with the OPPs capped at 693.75 mV and the SRAM rail >= 750 mV, SRAM always stays above the core rail.
+ */
+&mt6359_vproc1_buck_reg {
+	regulator-min-microvolt = <550000>;
+	regulator-max-microvolt = <900000>;
+};
+
+&mt6359_vsram_proc1_ldo_reg {
+	regulator-min-microvolt = <750000>;
+	regulator-max-microvolt = <900000>;
 };
 
 &pmic {

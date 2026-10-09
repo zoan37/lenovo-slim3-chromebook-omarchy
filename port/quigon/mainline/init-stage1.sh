@@ -28,6 +28,10 @@ for d in /sys/bus/platform/drivers/*/; do
   n=$(ls "$d" | grep -c '^[0-9a-f]*\.') ; [ "$n" -gt 0 ] && echo -n "$(basename "$d")=$n "
 done > /tmp/bound; k "bound: $(cut -c1-900 /tmp/bound)"
 k "regulators: $(ls /sys/class/regulator | wc -l): $(cat /sys/class/regulator/*/name 2>/dev/null | tr '\n' ' ' | cut -c1-700)"
+k "gpu: $(dmesg | grep -i -E 'panfrost|mali|13000000.gpu|mfgcfg' | tail -10 | tr '\n' ';' | cut -c1-950)"
+k "gpu: dri=[$(ls /dev/dri 2>/dev/null | tr '\n' ' ')] devfreq=[$(cat /sys/class/devfreq/*gpu*/cur_freq /sys/class/devfreq/*gpu*/available_frequencies 2>/dev/null | tr '\n' ' ')] mfg_bg3d=$(grep -E ' mfg_bg3d | mfg_sel_mfgpll ' /sys/kernel/debug/clk/clk_summary 2>/dev/null | tr -s ' ' | tr '\n' ';')"
+k "gpu: pm domains: $(grep -E 'mfg' /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null | tr -s ' ' | tr '\n' ';')"
+k "gpu: regulators: vproc1=$(cat /sys/class/regulator/*/name 2>/dev/null | grep -c vproc1) $(for r in /sys/class/regulator/*; do n=$(cat $r/name 2>/dev/null); case $n in vproc1|vsram_proc1) echo -n "$n=$(cat $r/microvolts 2>/dev/null)uV/$(cat $r/state 2>/dev/null) ";; esac; done)"
 k "pci: $(for d in /sys/bus/pci/devices/*; do [ -e "$d" ] && echo -n "$(basename "$d") $(cat "$d/vendor"):$(cat "$d/device"); "; done)"
 k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), pm domains: $(grep -c . /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null)"
 
