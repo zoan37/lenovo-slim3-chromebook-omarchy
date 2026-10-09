@@ -27,7 +27,7 @@ Experimental device port, not an installer.
 | Bluetooth, battery, suspend | BT works (scan); battery panel patched; s2idle suspend/resume passes the RTC-wake test |
 | Touchscreen, webcam | Both work out of the box |
 | Firewall | **ufw on** (iptables-legacy; IPv6 rules patched, logging off: kernel lacks nftables, `xt_LOG`, `xt_hl`, `ip6t_rt`): [notes/personal-setup-20261008.md](notes/personal-setup-20261008.md#firewall-ufw-on-iptables-legacy-working-since-2026-10-09) |
-| Hardware video decode | Not usable from Linux Chrome (decoder outputs MediaTek MM21 only) |
+| Hardware video decode | **Works in Chrome** for H.264 and VP9 (profile 0): VA-API driver patched for the MediaTek decoder (MM21 detiled on the CPU, ~1.7 ms/frame) + a gbm shim for Chrome. 1080p60 VP9: Chrome ~0.5 core instead of ~2. No HEVC/10-bit yet. [notes/video-decode-20261009.md](notes/video-decode-20261009.md) |
 | Hyprland + Omarchy | **Works**: Omarchy 4.0.4 (official aarch64 `edge` packages), uwsm session on seat0, NetworkManager: [notes/desktop-20261008.md](notes/desktop-20261008.md) |
 | GPU (Mali-G57 on kbase r54p1) | **On the GPU**: Hyprland, Chrome and every Electron app (auto-routed by `quigon-electron-sync`) on ChromeOS's own `libmali` GLES (RELR patch + EGL shim, + minigbm for Chromium); GTK 4 apps on libmali Vulkan via a patched ARM vulkan-wsi-layer; the Omarchy bar on libmali Vulkan (Qt Quick RHI, software fallback); other OpenGL apps via Zink; Ghostty via a patched private Zink. [notes/gpu-20261008.md](notes/gpu-20261008.md) |
 
@@ -39,15 +39,9 @@ Experimental device port, not an installer.
 
 ## To do
 
-- **Hardware video decode in Chrome (priority).** The decoder (`/dev/video5`, stateless H.264/VP9/HEVC, 4.x levels)
-  only outputs MediaTek's tiled `MM21`. Linux Chrome arm64 has VA-API decode built in (`VaapiVideoDecoder`,
-  `vaExportSurfaceHandle`) but no V4L2 decoder. Plan: teach the VA-API-on-V4L2 driver (`libva-v4l2_request`, already
-  in Omarchy's repo and lists the right profiles, but fails on MM21) to detile MM21 into NV12. Do it on the CPU with
-  NEON first, GPU later, and export the NV12 surface as a dma-buf for Chrome. Then run Chrome with VA-API forced on a
-  non-Mesa driver (`VaapiVideoDecoder`, `VaapiIgnoreDriverChecks`, `AcceleratedVideoDecodeLinuxGL`). No AV1 in this
-  hardware, so YouTube has to be steered to VP9 (e.g. by turning off AV1 decode). Measure first: YouTube dropped frames
-  and CPU at 1080p30/60 in software (ffmpeg baseline: 1080p30 VP9 ≈0.36 core). GStreamer's `v4l2codecs` already
-  handles MM21 for GStreamer-based players (local files).
+- Video decode follow-ups: HEVC (OUTPUT `CREATE_BUFS` fails, and it coincided with an SCP firmware crash, so it's
+  not advertised), 10-bit VP9/HEVC (the CAPTURE side is 8-bit MM21 only), zero-copy (let libmali sample MM21 via
+  `DRM_FORMAT_MOD_MTK_16L_32S_TILE`, or detile on the GPU, instead of the CPU copy), VA-API in Electron apps.
 - **The real fix: mainline kernel + open GPU driver (project).** Everything GPU-related here bridges ChromeOS's
   closed `libmali` to desktop Linux (EGL shim, minigbm, Zink, per-app wrappers, the bar on software). With a mainline
   kernel that knows MT8189 plus Panfrost for the Mali-G57 (Mesa's Panfrost is already conformant on G57, e.g. MT8195),

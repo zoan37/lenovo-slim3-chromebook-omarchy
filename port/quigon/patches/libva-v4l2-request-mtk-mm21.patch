@@ -1,0 +1,466 @@
+diff --git i/src/codec_h264.c w/src/codec_h264.c
+index 9c5459e..35ad60f 100644
+--- i/src/codec_h264.c
++++ w/src/codec_h264.c
+@@ -357,6 +357,8 @@ static void h264_fill_dpb(struct v4l2r_context *ctx,
+ 	struct h264_context *codec = ctx->codec_priv;
+ 	struct v4l2_ctrl_h264_decode_params *decode = &codec->decode_params;
+ 	unsigned int entries = 0;
++	int32_t max_frame_num =
++		1 << (pic->seq_fields.bits.log2_max_frame_num_minus4 + 4);
+ 
+ 	for (int i = 0; i < 16; i++) {
+ 		const VAPictureH264 *ref = &pic->ReferenceFrames[i];
+@@ -373,8 +375,23 @@ static void h264_fill_dpb(struct v4l2r_context *ctx,
+ 		entry = &decode->dpb[entries++];
+ 		entry->reference_ts = v4l2r_surface_timestamp(ctx->drv,
+ 							      ref->picture_id);
+-		entry->pic_num = ref->frame_idx;
++		/* pic_num is the derived PicNum (8.2.4.1): FrameNumWrap for
++		 * short-term references, which goes negative for frames from
++		 * before the last frame_num wrap, and LongTermPicNum for
++		 * long-term ones. Decoders that order references by it
++		 * (mtk-vcodec-dec) pick wrong references once frame_num wraps
++		 * if it is the raw frame_num. */
+ 		entry->frame_num = ref->frame_idx;
++		if (ref->flags & VA_PICTURE_H264_LONG_TERM_REFERENCE) {
++			entry->pic_num = ref->frame_idx;
++		} else {
++			int32_t wrap = (int32_t)ref->frame_idx;
++
++			if (ref->frame_idx > pic->frame_num)
++				wrap -= max_frame_num;
++			entry->pic_num = pic->pic_fields.bits.field_pic_flag ?
++					 2 * wrap + 1 : wrap;
++		}
+ 		entry->flags = V4L2_H264_DPB_ENTRY_FLAG_VALID |
+ 			       V4L2_H264_DPB_ENTRY_FLAG_ACTIVE;
+ 
+diff --git i/src/context.c w/src/context.c
+index d905a6b..293c958 100644
+--- i/src/context.c
++++ w/src/context.c
+@@ -396,6 +396,13 @@ static int capture_buffer_new(struct v4l2r_context *ctx)
+ 		return -ENOSPC;
+ 	}
+ 
++	/* The CPU MM21 converter reads every frame back: ask for cached
++	 * (non-coherent) buffers, which vb2 invalidates on DQBUF. The default
++	 * mapping is uncached, and reading a 1080p frame from it costs ~4 ms. */
++	if (ctx->conv && ctx->conv->cpu &&
++	    (ctx->capture_capabilities & V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS))
++		buffers.flags = V4L2_MEMORY_FLAG_NON_COHERENT;
++
+ 	if (ioctl(ctx->video_fd, VIDIOC_CREATE_BUFS, &buffers) < 0) {
+ 		v4l2r_log("failed to allocate CAPTURE buffer #%u (%zu bytes; "
+ 			  "already %u buffers ~%llu MiB allocated): %s\n",
+diff --git i/src/convert.c w/src/convert.c
+index c117126..b993ac7 100644
+--- i/src/convert.c
++++ w/src/convert.c
+@@ -28,8 +28,10 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/ioctl.h>
++#include <sys/mman.h>
+ #include <unistd.h>
+ 
++#include <linux/dma-buf.h>
+ #include <linux/videodev2.h>
+ 
+ #include "v4l2_request.h"
+@@ -42,6 +44,186 @@
+ #define V4L2R_VPP_MIN_DIM 34
+ #define V4L2R_VPP_MAX_DIM 8192
+ 
++/*
++ * MediaTek MM21 (mtk-vcodec-dec): there is no mem2mem device that reads it
++ * (no MDP on the ChromeOS kernel), so frames are detiled on the CPU right
++ * when their decode completes. MM21 stores each plane as a raster of tiles
++ * 16 bytes wide and 32 rows tall for luma, 16 rows for the interleaved
++ * chroma; each tile is one contiguous block (16 * tile_height bytes), and a
++ * row of tiles takes bytesperline * tile_height bytes.
++ *
++ * The source is read strictly sequentially, a whole tile at a time in
++ * 64-byte loads, and the rows are scattered into the destination. With the
++ * CAPTURE buffers allocated non-coherent (cached, see context.c) a 1080p
++ * frame takes ~1.7 ms on the Kompanio 540 (~4 ms from the default uncached
++ * mapping).
++ */
++#if defined(__aarch64__)
++#include <arm_neon.h>
++#endif
++
++static void detile_plane(const uint8_t *src, uint32_t src_stride,
++			 uint8_t *dst, uint32_t dst_stride,
++			 uint32_t width, uint32_t height, uint32_t tile_height)
++{
++	const size_t tile_size = 16 * tile_height;
++
++	for (uint32_t y0 = 0; y0 < height; y0 += tile_height) {
++		const uint8_t *tile = src + (size_t)(y0 / tile_height) * src_stride * tile_height;
++		uint32_t rows = height - y0 < tile_height ? height - y0 : tile_height;
++		uint8_t *drow = dst + (size_t)y0 * dst_stride;
++
++		for (uint32_t x = 0; x < width; x += 16, tile += tile_size) {
++			const uint8_t *s = tile;
++			uint8_t *d = drow + x;
++			uint32_t r = 0;
++
++#if defined(__aarch64__)
++			for (; r + 4 <= rows; r += 4, s += 64, d += 4 * (size_t)dst_stride) {
++				uint8x16x4_t v = vld1q_u8_x4(s);
++
++				vst1q_u8(d, v.val[0]);
++				vst1q_u8(d + dst_stride, v.val[1]);
++				vst1q_u8(d + 2 * (size_t)dst_stride, v.val[2]);
++				vst1q_u8(d + 3 * (size_t)dst_stride, v.val[3]);
++			}
++#endif
++			for (; r < rows; r++, s += 16, d += dst_stride)
++				memcpy(d, s, 16);
++		}
++	}
++}
++
++static VAStatus convert_setup_cpu(struct v4l2r_context *ctx)
++{
++	struct v4l2r_convert *conv;
++	struct v4l2_pix_format_mplane *pix_mp;
++	uint32_t width = v4l2r_format_width(&ctx->capture_format);
++	uint32_t height = v4l2r_format_height(&ctx->capture_format);
++	uint32_t pitch = (width + 63) & ~63u;
++
++	if (!V4L2_TYPE_IS_MULTIPLANAR(ctx->capture_format.type) ||
++	    width % 16 || height % 32)
++		return VA_STATUS_ERROR_OPERATION_FAILED;
++
++	conv = calloc(1, sizeof(*conv));
++	if (!conv)
++		return VA_STATUS_ERROR_ALLOCATION_FAILED;
++
++	conv->fd = -1;
++	conv->cpu = true;
++	conv->output_format = ctx->capture_format;
++	conv->capture_format = (struct v4l2_format) {
++		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
++	};
++	pix_mp = &conv->capture_format.fmt.pix_mp;
++	pix_mp->pixelformat = V4L2_PIX_FMT_NV12;
++	pix_mp->width = width;
++	pix_mp->height = height;
++	pix_mp->num_planes = 1;
++	pix_mp->plane_fmt[0].bytesperline = pitch;
++	pix_mp->plane_fmt[0].sizeimage = pitch * height * 3 / 2;
++
++	for (unsigned int i = 0; i < V4L2R_CONVERT_SLOTS; i++)
++		conv->jobs[i].capture_index = -1;
++
++	ctx->conv = conv;
++	v4l2r_log("converting MM21 to NV12 on the CPU (%ux%u)\n", width, height);
++
++	return VA_STATUS_SUCCESS;
++}
++
++static void dmabuf_sync(int fd, uint64_t flags)
++{
++	struct dma_buf_sync sync = { .flags = flags };
++
++	if (fd >= 0)
++		ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
++}
++
++/* Detile a finished MM21 decode into the surface's NV12 backing. Called with
++ * ctx->mutex held, from the CAPTURE dequeue path. */
++static void convert_cpu(struct v4l2r_context *ctx,
++			struct v4l2r_capture_buffer *capture, int capture_index,
++			struct v4l2r_surface *surface)
++{
++	struct v4l2r_convert *conv = ctx->conv;
++	const struct v4l2_pix_format_mplane *src = &ctx->capture_format.fmt.pix_mp;
++	uint32_t width = src->width, height = src->height;
++	uint32_t y_stride = src->plane_fmt[0].bytesperline;
++	uint32_t uv_stride = src->num_planes > 1 ?
++			     src->plane_fmt[1].bytesperline : y_stride;
++	struct v4l2r_surface_backing *backing;
++	const uint8_t *y, *uv;
++	uint8_t *dst;
++	uint64_t t0 = v4l2r_now_ns();
++
++	if (v4l2r_surface_convert_backing(ctx->drv, surface) != VA_STATUS_SUCCESS) {
++		v4l2r_log("no NV12 backing for MM21 conversion\n");
++		conv->failed = true;
++		return;
++	}
++	backing = surface->backing;
++
++	for (unsigned int i = 0; i < capture->nb_planes; i++) {
++		if (capture->map[i])
++			continue;
++		capture->map[i] = mmap(NULL, capture->plane_size[i], PROT_READ,
++				       MAP_SHARED, ctx->video_fd,
++				       capture->plane_mem_offset[i]);
++		if (capture->map[i] == MAP_FAILED) {
++			capture->map[i] = NULL;
++			v4l2r_log("cannot map CAPTURE buffer %d plane %u: %s\n",
++				  capture_index, i, strerror(errno));
++			conv->failed = true;
++			return;
++		}
++	}
++	if (!backing->map[0]) {
++		void *addr = mmap(NULL, backing->plane_size[0],
++				  PROT_READ | PROT_WRITE, MAP_SHARED,
++				  backing->dmabuf_fd[0], 0);
++		if (addr == MAP_FAILED) {
++			v4l2r_log("cannot map NV12 backing: %s\n", strerror(errno));
++			conv->failed = true;
++			return;
++		}
++		backing->map[0] = addr;
++	}
++
++	y = capture->map[0];
++	uv = capture->nb_planes > 1 ? capture->map[1] :
++	     y + (size_t)y_stride * height;
++	dst = backing->map[0];
++
++	if (v4l2r_export_capture_dmabufs(ctx, capture, capture_index) == 0)
++		for (unsigned int i = 0; i < capture->nb_planes; i++)
++			dmabuf_sync(capture->dmabuf_fd[i],
++				    DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
++	dmabuf_sync(backing->dmabuf_fd[0], DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
++
++	/* The backing may be smaller than the decoder's aligned CAPTURE
++	 * frame (1920x1080 exported vs 1920x1088 decoded): clamp, and place
++	 * chroma where the exported layout says (pitch * backing height). */
++	if (width > backing->width)
++		width = backing->width;
++	if (width > backing->pitch)
++		width = backing->pitch & ~15u;
++	detile_plane(y, y_stride, dst, backing->pitch, width,
++		     height < backing->height ? height : backing->height, 32);
++	detile_plane(uv, uv_stride, dst + (size_t)backing->pitch * backing->height,
++		     backing->pitch, width,
++		     (height < backing->height ? height : backing->height) / 2, 16);
++
++	dmabuf_sync(backing->dmabuf_fd[0], DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
++	for (unsigned int i = 0; i < capture->nb_planes; i++)
++		dmabuf_sync(capture->dmabuf_fd[i],
++			    DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
++
++	v4l2r_trace("MM21 detile (surface 0x%08x buf #%d): %.2f ms\n",
++		    surface->id, capture_index, (v4l2r_now_ns() - t0) / 1e6);
++}
++
+ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
+ {
+ 	struct v4l2r_driver *drv = ctx->drv;
+@@ -52,6 +234,11 @@ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
+ 	uint32_t width = v4l2r_format_width(&ctx->capture_format);
+ 	uint32_t height = v4l2r_format_height(&ctx->capture_format);
+ 
++#if defined(V4L2_PIX_FMT_MM21)
++	if (src_pixelformat == V4L2_PIX_FMT_MM21)
++		return convert_setup_cpu(ctx);
++#endif
++
+ 	if (!v4l2r_converter_supports(drv, src_pixelformat))
+ 		return VA_STATUS_ERROR_OPERATION_FAILED;
+ 
+@@ -167,7 +354,8 @@ void v4l2r_convert_destroy(struct v4l2r_context *ctx)
+ 
+ 	/* Closing the fd tears down the m2m context including any queued
+ 	 * jobs; importer-side dma-buf references are dropped with it. */
+-	close(conv->fd);
++	if (conv->fd >= 0)
++		close(conv->fd);
+ 	free(conv);
+ 	ctx->conv = NULL;
+ }
+@@ -258,6 +446,11 @@ void v4l2r_convert_kick(struct v4l2r_context *ctx, int capture_index)
+ 	if (!surface)
+ 		return;
+ 
++	if (conv->cpu) {
++		convert_cpu(ctx, capture, capture_index, surface);
++		return;
++	}
++
+ 	convert_reap(ctx, false);
+ 
+ 	/* All slots busy: wait one out. */
+diff --git i/src/decode.c w/src/decode.c
+index 777750b..e2b024b 100644
+--- i/src/decode.c
++++ w/src/decode.c
+@@ -106,6 +106,10 @@ static int queue_buffer(struct v4l2r_context *ctx, struct v4l2_buffer *buffer)
+ 		planes[0].bytesused = buffer->bytesused;
+ 		buffer->bytesused = 0;
+ 		buffer->length = 1;
++		/* CAPTURE carries every plane of the format (MM21 has two). */
++		if (!V4L2_TYPE_IS_OUTPUT(buffer->type) &&
++		    ctx->capture_format.fmt.pix_mp.num_planes > 1)
++			buffer->length = ctx->capture_format.fmt.pix_mp.num_planes;
+ 		buffer->m.planes = planes;
+ 	}
+ 
+@@ -172,6 +176,9 @@ static int dequeue_buffer(struct v4l2r_context *ctx, enum v4l2_buf_type type)
+ 
+ 	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
+ 		buffer.length = 1;
++		if (!V4L2_TYPE_IS_OUTPUT(type) &&
++		    ctx->capture_format.fmt.pix_mp.num_planes > 1)
++			buffer.length = ctx->capture_format.fmt.pix_mp.num_planes;
+ 		buffer.m.planes = planes;
+ 	}
+ 
+diff --git i/src/driver.c w/src/driver.c
+index 1f93497..fb11b98 100644
+--- i/src/driver.c
++++ w/src/driver.c
+@@ -142,6 +142,13 @@ static const struct v4l2r_format_info format_infos[] = {
+ 	{ V4L2_PIX_FMT_NV12_32L32, DRM_FORMAT_NV12, DRM_FORMAT_MOD_ALLWINNER_TILED,
+ 	  0, VA_RT_FORMAT_YUV420, 8, false },
+ #endif
++#if defined(V4L2_PIX_FMT_MM21) && defined(DRM_FORMAT_MOD_MTK_16L_32S_TILE)
++	/* MediaTek 8-bit block-tiled NV12 (16x32 luma / 16x16 chroma tiles, two
++	 * planes), the only CAPTURE format of mtk-vcodec-dec. Nothing on the
++	 * desktop samples it, so it is detiled to NV12 on the CPU (convert.c). */
++	{ V4L2_PIX_FMT_MM21, DRM_FORMAT_NV12, DRM_FORMAT_MOD_MTK_16L_32S_TILE,
++	  0, VA_RT_FORMAT_YUV420, 8, false },
++#endif
+ #if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
+ 	{ V4L2_PIX_FMT_NV15, DRM_FORMAT_NV15, DRM_FORMAT_MOD_LINEAR,
+ 	  0, VA_RT_FORMAT_YUV420_10, 10, false },
+diff --git i/src/surface.c w/src/surface.c
+index da433b2..38c57df 100644
+--- i/src/surface.c
++++ w/src/surface.c
+@@ -18,6 +18,7 @@
+ #include <sys/mman.h>
+ #include <unistd.h>
+ 
++#include <linux/dma-heap.h>
+ #include <linux/videodev2.h>
+ 
+ #include <drm_fourcc.h>
+@@ -445,6 +446,60 @@ next:
+ 	return VA_STATUS_ERROR_OPERATION_FAILED;
+ }
+ 
++/*
++ * NV12 backing from the dma-buf system heap, for decoders whose CAPTURE
++ * queue cannot produce NV12 at all (mtk-vcodec-dec only does MM21). The
++ * CPU converter fills it; consumers import it like any other dma-buf.
++ */
++static VAStatus backing_alloc_heap(struct v4l2r_surface *surface,
++				   uint32_t width, uint32_t height,
++				   uint32_t pitch)
++{
++	struct v4l2r_surface_backing *backing;
++	struct dma_heap_allocation_data alloc = {0};
++	int heap;
++
++	height = (height + 1) & ~1u;
++	if (!pitch)
++		pitch = (width + 63) & ~63u;
++
++	heap = open("/dev/dma_heap/system", O_RDWR | O_CLOEXEC);
++	if (heap < 0) {
++		v4l2r_log("cannot open /dev/dma_heap/system: %s\n",
++			  strerror(errno));
++		return VA_STATUS_ERROR_ALLOCATION_FAILED;
++	}
++
++	alloc.len = (uint64_t)pitch * height * 3 / 2;
++	alloc.fd_flags = O_RDWR | O_CLOEXEC;
++	if (ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &alloc) < 0) {
++		v4l2r_log("dma-heap allocation of %llu bytes failed: %s\n",
++			  (unsigned long long)alloc.len, strerror(errno));
++		close(heap);
++		return VA_STATUS_ERROR_ALLOCATION_FAILED;
++	}
++	close(heap);
++
++	backing = calloc(1, sizeof(*backing));
++	if (!backing) {
++		close(alloc.fd);
++		return VA_STATUS_ERROR_ALLOCATION_FAILED;
++	}
++	for (unsigned int i = 0; i < VIDEO_MAX_PLANES; i++)
++		backing->dmabuf_fd[i] = -1;
++
++	backing->pixelformat = V4L2_PIX_FMT_NV12;
++	backing->width = width;
++	backing->height = height;
++	backing->pitch = pitch;
++	backing->nb_planes = 1;
++	backing->plane_size[0] = alloc.len;
++	backing->dmabuf_fd[0] = alloc.fd;
++
++	surface->backing = backing;
++	return VA_STATUS_SUCCESS;
++}
++
+ /* Backing for a bare (unbound) surface, sized like the surface itself. */
+ static VAStatus backing_alloc_default(struct v4l2r_driver *drv,
+ 				      struct v4l2r_surface *surface)
+@@ -459,8 +514,16 @@ static VAStatus backing_alloc_default(struct v4l2r_driver *drv,
+ 	     !v4l2r_converter_available(drv)))
+ 		pixelformat = V4L2_PIX_FMT_P010;
+ 
+-	return backing_alloc(drv, surface, surface->width, surface->height,
+-			     pixelformat);
++	if (backing_alloc(drv, surface, surface->width, surface->height,
++			  pixelformat) == VA_STATUS_SUCCESS)
++		return VA_STATUS_SUCCESS;
++
++	/* No decoder can lay out NV12 itself (MM21-only MediaTek). */
++	if (pixelformat == V4L2_PIX_FMT_NV12)
++		return backing_alloc_heap(surface, surface->width,
++					  surface->height, 0);
++
++	return VA_STATUS_ERROR_OPERATION_FAILED;
+ }
+ 
+ /*
+@@ -480,6 +543,26 @@ VAStatus v4l2r_surface_convert_backing(struct v4l2r_driver *drv,
+ 
+ 	pix_mp = &conv->capture_format.fmt.pix_mp;
+ 
++	/* CPU conversion writes into whatever NV12 backing the surface has,
++	 * clamped to its size: clients export surfaces before the first
++	 * decode (Chrome) and keep showing that buffer, so it must never be
++	 * swapped for a new one. Without backing, allocate one at the surface
++	 * size (the decoder's CAPTURE height is aligned up, e.g. 1088). */
++	if (conv->cpu) {
++		uint32_t height = pix_mp->height;
++
++		if (surface->backing &&
++		    surface->backing->pixelformat == V4L2_PIX_FMT_NV12 &&
++		    surface->backing->nb_planes == 1 &&
++		    surface->backing->pitch >= surface->backing->width)
++			return VA_STATUS_SUCCESS;
++		v4l2r_surface_free_backing(surface);
++		if (surface->height && surface->height < height)
++			height = surface->height;
++		return backing_alloc_heap(surface, pix_mp->width, height,
++					  pix_mp->plane_fmt[0].bytesperline);
++	}
++
+ 	/* Backing left over from pre-decode probing may have the wrong
+ 	 * size; replace it. */
+ 	if (surface->backing &&
+diff --git i/src/v4l2_request.h w/src/v4l2_request.h
+index 80ca83e..c396a4b 100644
+--- i/src/v4l2_request.h
++++ w/src/v4l2_request.h
+@@ -335,6 +335,7 @@ struct v4l2r_convert {
+ 		struct v4l2r_surface *surface;	/* destination surface */
+ 	} jobs[V4L2R_CONVERT_SLOTS];
+ 	bool failed;			/* chain broke (layout/queue error), disabled */
++	bool cpu;			/* MM21: detiled on the CPU, fd unused */
+ };
+ 
+ /*
