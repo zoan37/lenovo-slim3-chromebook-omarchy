@@ -99,6 +99,7 @@ check_system() {
   grep -q '^LOGLEVEL=off' /etc/ufw/ufw.conf 2>/dev/null && pass "ufw logging off (no xt_LOG in this kernel)" || fail "ufw logging is on: the LOG target is missing here (sudo ufw logging off)"
   iptables -V 2>/dev/null | grep -q legacy && pass "iptables is the legacy backend" || fail "iptables is not iptables-legacy (this kernel has no nftables)"
   iptables -S ufw-user-input >/dev/null 2>&1 && pass "firewall (ufw) active" || fail "firewall (ufw) not active (sudo ufw enable — test over SSH with an auto-revert)"
+  grep -q 'quigon/bar-env' /usr/bin/omarchy-launch-shell 2>/dev/null && pass "bar launcher picks its renderer (bar-env)" || { (( FIX )) && /usr/local/bin/fix-omarchy-launch-shell && repaired "re-applied bar launcher patch"; } || fail "omarchy-launch-shell not patched: the bar would inherit Zink and crash (sudo fix-omarchy-launch-shell)"
   if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
   elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
   else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi
@@ -111,7 +112,11 @@ check_session() {
   if [[ -n $p ]]; then
     grep -q libmali /proc/$p/maps 2>/dev/null && pass "Hyprland is rendering on the Mali" || fail "Hyprland is running on llvmpipe"
   else fail "Hyprland is not running"; fi
-  pgrep -x quickshell >/dev/null && pass "Omarchy bar (quickshell) running" || fail "Omarchy bar not running (omarchy-restart-shell)"
+  local qp; qp=$(pgrep -u "$u" -x quickshell | head -1)
+  if [[ -z $qp ]]; then fail "Omarchy bar not running (omarchy-restart-shell)"
+  elif grep -q libmali /proc/$qp/maps 2>/dev/null; then pass "Omarchy bar running on the GPU (Qt Quick on libmali Vulkan)"
+  elif [[ -e /run/user/$uid/quigon-bar-starts.fellback ]]; then fail "Omarchy bar fell back to software after restarting repeatedly on Vulkan (journalctl -t omarchy-shell -t quigon-bar)"
+  else pass "Omarchy bar running (software rendering$([[ -e /etc/quigon/bar-software ]] && echo ', /etc/quigon/bar-software set'))"; fi
   local d
   for d in google-chrome.desktop:quigon-chrome com.mitchellh.ghostty.desktop:quigon-ghostty; do
     grep -q "Exec=/usr/local/bin/${d#*:}" "$home/.local/share/applications/${d%%:*}" 2>/dev/null && pass "${d%%:*} → ${d#*:}" || fail "${d%%:*} override missing (GPU wrapper not used)"

@@ -1,12 +1,17 @@
 #!/bin/bash
-# Keep the Omarchy bar (Quickshell) off Mesa while desktop apps default to Zink: the real Omarchy shell crashes on Zink
-# here (vkCreateImage VK_ERROR_INVALID_EXTERNAL_HANDLE). QT_QUICK_BACKEND=software makes its Qt Quick scene render
-# without OpenGL, so it never loads Mesa, while its environment still carries Zink for the apps it launches (the
-# Omarchy launcher/menus run inside the bar). Idempotent; re-applied by zz-omarchy-launch-shell.hook after upgrades.
+# Pick the Omarchy bar's (Quickshell's) renderer per launch via /usr/local/libexec/quigon/bar-env: Qt Quick on Vulkan
+# directly on libmali (default), or Qt Quick's software renderer (GPU mode off, /etc/quigon/bar-software, or a crash
+# loop). The bar must not inherit the desktop's Zink default: the real Omarchy shell crashes on Zink here
+# (vkCreateImage VK_ERROR_INVALID_EXTERNAL_HANDLE). Apps launched from the bar's menus inherit its environment, so
+# Qt Quick apps started there also render on Vulkan (or in software after a fallback); everything else is unaffected.
+# Idempotent (also upgrades the older software-only patch); re-applied by zz-omarchy-launch-shell.hook after upgrades.
 f=/usr/bin/omarchy-launch-shell
 [[ -f $f ]] || exit 0
-sed -i 's|-- env -u MESA_LOADER_DRIVER_OVERRIDE LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe quickshell|-- env QT_QUICK_BACKEND=software quickshell|' "$f"
-grep -q 'env QT_QUICK_BACKEND=software quickshell' "$f" || \
-  sed -i 's|systemd-cat -t omarchy-shell -- quickshell -n -p|systemd-cat -t omarchy-shell -- env QT_QUICK_BACKEND=software quickshell -n -p|' "$f"
-grep -q 'quigon: bar' "$f" || sed -i '0,/^run_shell() {/s//# quigon: bar renders Qt Quick in software (see \/usr\/local\/bin\/fix-omarchy-launch-shell)\nrun_shell() {/' "$f"
-sed -i 's|^# quigon: bar on llvmpipe (see /usr/local/bin/fix-omarchy-launch-shell)|# quigon: bar renders Qt Quick in software (see /usr/local/bin/fix-omarchy-launch-shell)|' "$f"
+new='-- env $(/usr/local/libexec/quigon/bar-env) quickshell'
+sed -i \
+  -e "s#-- env -u MESA_LOADER_DRIVER_OVERRIDE LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe quickshell#$new#" \
+  -e "s#-- env QT_QUICK_BACKEND=software quickshell#$new#" \
+  -e "s#-- env -u QT_QUICK_BACKEND QSG_RHI_BACKEND=vulkan quickshell#$new#" "$f"
+grep -qF -- "$new" "$f" || sed -i "s#systemd-cat -t omarchy-shell -- quickshell -n -p#systemd-cat -t omarchy-shell $new -n -p#" "$f"
+sed -i '/^# quigon: bar /d' "$f"
+sed -i '0,/^run_shell() {/s//# quigon: bar renderer picked by \/usr\/local\/libexec\/quigon\/bar-env (see \/usr\/local\/bin\/fix-omarchy-launch-shell)\nrun_shell() {/' "$f"
