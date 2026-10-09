@@ -1,0 +1,12 @@
+[Unit]
+Description=ChromeOS-style touchpad palm rejection (Elan touchpad)
+After=systemd-udev-settle.service
+
+[Service]
+ExecStartPre=-/usr/bin/modprobe uinput
+ExecStart=/usr/local/libexec/quigon/quigon-palm-filter
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

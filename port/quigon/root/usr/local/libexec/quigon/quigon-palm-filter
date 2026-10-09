@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+# quigon-palm-filter: ChromeOS's touchpad palm rejection on Omarchy, for the Lenovo IdeaPad Slim 3 Chromebook's
+# Elan touchpad (i2c 04f3:014e, 119x73 mm, 31 units/mm, per-finger pressure and contact size).
+#
+# Classification is a port of the ChromeOS gestures library's PalmClassifyingFilterInterpreter
+# (chromiumos/platform/gestures src/palm_classifying_filter_interpreter.cc) with its stock defaults, which ChromeOS
+# uses unchanged for this pad (its 40-touchpad-cmt.conf only sets the Elan pressure calibration: slope 3.1416), plus
+# ImmediateInterpreter's "Keyboard Palm Prevent Timeout" (no taps for 0.5 s after a keystroke; pointer motion is never
+# blocked, so held game keys don't mute the pad).
+#
+# A contact is a palm when (all distances mm, pressure calibrated = raw * 3.1416):
+#   pressure >= 200 or width >= 75                     -> palm for its lifetime (large palm)
+#   it's the only contact and width >= 21.2            -> palm for its lifetime
+#   ...unless it then moves > 15 mm with max pressure <= 280 and max width <= 27.6 (a fat finger)
+#   rests in the edge envelope (< 4 mm travel for 2 s)  -> palm for its lifetime
+#   in the edge envelope and not yet "pointing"         -> hidden while there
+# Edge envelope: left/right strips 8 mm wide, growing to 14 mm with pressure (8 + 6*p/200), and the bottom 8 mm.
+# "Pointing" = landed outside the envelope, near another finger (4-50 mm away), or moved >= 8 mm consistently.
+#
+# The daemon grabs the real touchpad and re-emits accepted contacts on a virtual one (uinput), which libinput/Hyprland
+# use as usual. If it dies, the grab is released and the raw touchpad works again. Key codes are never logged.
+import os, selectors, sys, syslog, time
+import evdev
+from evdev import ecodes as e
+
+def env(name, default):
+    return float(os.environ.get(name, default))
+
+PRESSURE_SLOPE = env("PRESSURE_SLOPE", 3.1416)   # ChromeOS Elan calibration
+PRESSURE_OFFSET = env("PRESSURE_OFFSET", 0.0)
+PALM_PRESSURE = env("PALM_PRESSURE", 200.0)
+PALM_WIDTH = env("PALM_WIDTH", 21.2)
+MULTI_PALM_WIDTH = env("MULTI_PALM_WIDTH", 75.0)
+FAT_P_RATIO = env("FAT_FINGER_PRESSURE_RATIO", 1.4)
+FAT_W_RATIO = env("FAT_FINGER_WIDTH_RATIO", 1.3)
+FAT_MIN_DIST = env("FAT_FINGER_MIN_DIST", 15.0)
+EDGE_MIN = env("EDGE_MIN", 8.0)                  # Tap Exclusion Border Width
+EDGE_MAX = env("EDGE_MAX", 14.0)                 # Palm Edge Zone Width
+EVAL_TIMEOUT = env("EVAL_TIMEOUT", 0.1)
+STATIONARY_TIME = env("STATIONARY_TIME", 2.0)
+STATIONARY_DIST = env("STATIONARY_DIST", 4.0)
+POINT_MIN = env("POINT_MIN", 8.0)
+POINT_MAX_REVERSE = env("POINT_MAX_REVERSE", 0.3)
+SPLIT_MAX = env("SPLIT_MAX", 4.0)
+NEAR_MAX = env("NEAR_MAX", 50.0)                 # CloseEnoughToGesture
+KBD_TAP_TIMEOUT = env("KBD_TAP_TIMEOUT", 0.5)    # Keyboard Palm Prevent Timeout
+TAP_HOLD = env("TAP_HOLD", 0.2)                  # contact must live this long or move TAP_MOVE mm to count
+TAP_MOVE = env("TAP_MOVE", 2.0)
+DEBUG = os.environ.get("DEBUG", "0") == "1"
+DRY = "--dry" in sys.argv
+
+TOOL_BTNS = [e.BTN_TOOL_FINGER, e.BTN_TOOL_DOUBLETAP, e.BTN_TOOL_TRIPLETAP, e.BTN_TOOL_QUADTAP, e.BTN_TOOL_QUINTTAP]
+MODS = {e.KEY_LEFTSHIFT, e.KEY_RIGHTSHIFT, e.KEY_LEFTCTRL, e.KEY_RIGHTCTRL, e.KEY_LEFTALT, e.KEY_RIGHTALT,
+        e.KEY_LEFTMETA, e.KEY_RIGHTMETA, e.KEY_CAPSLOCK}
+RES, XMAX, YMAX, NSLOTS = 31, 3679, 2261, 5
+ui = None
+last_key = -1e9
+
+def log(msg):
+    syslog.syslog(syslog.LOG_INFO, msg)
+    if DEBUG or DRY:
+        print(msg, flush=True)
+
+def mm(u):
+    return u / RES
+
+class Contact:
+    def __init__(self, slot, tid, t):
+        self.slot, self.tid, self.t0 = slot, tid, t
+        self.x = self.y = None
+        self.p_raw = 0; self.w_raw = 0
+        self.ox = self.oy = None               # origin
+        self.px = self.py = None               # previous frame
+        self.pos = [0.0, 0.0]; self.neg = [0.0, 0.0]
+        self.max_p = 0.0; self.max_w = 0.0
+        self.palm = False; self.large = False
+        self.pointing = False; self.was_near = False
+        self.non_stationary = False
+        self.tap_guard = (t - last_key) < KBD_TAP_TIMEOUT
+        self.hidden_reason = ""
+        self.visible = False; self.out_tid = None
+        self.ever_visible = False
+
+    # calibrated, in ChromeOS units
+    def pressure(self): return self.p_raw * PRESSURE_SLOPE + PRESSURE_OFFSET
+    def width(self): return mm(self.w_raw)
+    def age(self, t): return t - self.t0
+    def dist_from_origin(self): return mm(((self.x - self.ox) ** 2 + (self.y - self.oy) ** 2) ** 0.5)
+
+    def in_envelope(self):
+        limit = EDGE_MIN + (self.pressure() / PALM_PRESSURE) * (EDGE_MAX - EDGE_MIN)
+        return mm(self.x) < limit or mm(XMAX - self.x) < limit
+
+    def in_bottom(self):
+        return mm(YMAX - self.y) < EDGE_MIN
+
+    def on_edge(self):
+        return self.in_envelope() or self.in_bottom()
+
+contacts = {}
+slot_last = {}
+cur = 0
+btn_left = 0
+
+def near_other(c, live):
+    for o in live:
+        if o is c or o.palm:
+            continue
+        d = mm(((c.x - o.x) ** 2 + (c.y - o.y) ** 2) ** 0.5)
+        if SPLIT_MAX <= d <= NEAR_MAX:
+            c.was_near = True
+            return True
+    return False
+
+def classify(t):
+    live = [c for c in contacts.values() if c.tid != -1 and c.x is not None and c.y is not None]
+    for c in live:
+        if c.ox is None:
+            c.ox, c.oy = c.x, c.y
+        if c.px is not None:
+            for i, d in enumerate((c.x - c.px, c.y - c.py)):
+                if d > 0: c.pos[i] += mm(d)
+                else: c.neg[i] -= mm(d)
+        c.max_p = max(c.max_p, c.pressure()); c.max_w = max(c.max_w, c.width())
+    # large palms
+    for c in live:
+        if c.pressure() >= PALM_PRESSURE or c.width() >= MULTI_PALM_WIDTH:
+            c.large = c.palm = True; c.pointing = False; c.hidden_reason = c.hidden_reason or "pressure"
+    if len(live) == 1 and live[0].width() >= PALM_WIDTH:
+        c = live[0]; c.large = c.palm = True; c.pointing = False; c.hidden_reason = c.hidden_reason or "width"
+    for c in live:
+        if c.palm:
+            if (c.max_p <= PALM_PRESSURE * FAT_P_RATIO and c.max_w <= PALM_WIDTH * FAT_W_RATIO
+                    and c.dist_from_origin() > FAT_MIN_DIST):
+                c.palm = c.large = False; c.hidden_reason = ""
+                if DEBUG: log(f"slot{c.slot} fat finger -> finger")
+            else:
+                continue
+        if c.age(t) < EVAL_TIMEOUT:
+            c.pointing = False
+        near = near_other(c, live)
+        if not c.pointing and (near or not c.on_edge()):
+            c.pointing = True
+        for i in range(2):
+            if (c.pos[i] >= POINT_MIN and c.neg[i] <= POINT_MAX_REVERSE) or \
+               (c.neg[i] >= POINT_MIN and c.pos[i] <= POINT_MAX_REVERSE):
+                c.pointing = True
+        if c.age(t) <= STATIONARY_TIME and not c.non_stationary:
+            if c.dist_from_origin() > STATIONARY_DIST or not c.on_edge():
+                c.non_stationary = True
+        elif not c.non_stationary and not near_other(c, live) and c.age(t) > STATIONARY_TIME:
+            c.palm = True; c.pointing = False; c.hidden_reason = "edge-rest"
+    for c in live:
+        hide = c.palm
+        if not hide and not c.pointing and not c.was_near and c.in_envelope():
+            hide = True; c.hidden_reason = c.hidden_reason or "edge"
+        if not hide and c.tap_guard and not c.ever_visible:
+            if c.age(t) < TAP_HOLD and c.dist_from_origin() < TAP_MOVE and not btn_left:
+                hide = True; c.hidden_reason = "after-typing"
+            else:
+                c.tap_guard = False
+        c.visible = not hide
+        if c.visible: c.ever_visible = True
+        c.px, c.py = c.x, c.y
+
+out = {}; out_slot = None; out_btn = {}; out_xy = (None, None); next_tid = 1
+
+def emit_frame():
+    global out_slot, out_xy, next_tid
+    evs = []
+    w = lambda t, c, v: evs.append((t, c, v))
+    def sel(s):
+        global out_slot
+        if out_slot != s:
+            w(e.EV_ABS, e.ABS_MT_SLOT, s); out_slot = s
+    vis = []
+    for s in range(NSLOTS):
+        c = contacts.get(s)
+        show = c is not None and c.tid != -1 and c.visible and c.x is not None
+        prev = out.get(s)
+        if show:
+            state = (c.x, c.y, c.p_raw, c.w_raw)
+            if prev is None:
+                c.out_tid = next_tid; next_tid = next_tid % 65535 + 1
+                sel(s); w(e.EV_ABS, e.ABS_MT_TRACKING_ID, c.out_tid)
+                w(e.EV_ABS, e.ABS_MT_POSITION_X, c.x); w(e.EV_ABS, e.ABS_MT_POSITION_Y, c.y)
+                w(e.EV_ABS, e.ABS_MT_PRESSURE, c.p_raw); w(e.EV_ABS, e.ABS_MT_TOUCH_MAJOR, c.w_raw)
+            else:
+                _, px, py, pp, pw = prev
+                if (c.x, c.y, c.p_raw, c.w_raw) != (px, py, pp, pw):
+                    sel(s)
+                    if c.x != px: w(e.EV_ABS, e.ABS_MT_POSITION_X, c.x)
+                    if c.y != py: w(e.EV_ABS, e.ABS_MT_POSITION_Y, c.y)
+                    if c.p_raw != pp: w(e.EV_ABS, e.ABS_MT_PRESSURE, c.p_raw)
+                    if c.w_raw != pw: w(e.EV_ABS, e.ABS_MT_TOUCH_MAJOR, c.w_raw)
+            out[s] = (c.out_tid,) + state
+            vis.append(c)
+        elif prev is not None:
+            sel(s); w(e.EV_ABS, e.ABS_MT_TRACKING_ID, -1); del out[s]
+    n = len(vis)
+    want = {e.BTN_TOUCH: int(n > 0), e.BTN_LEFT: btn_left}
+    for i, b in enumerate(TOOL_BTNS):
+        want[b] = int(n == i + 1)
+    for b, v in want.items():
+        if out_btn.get(b, 0) != v:
+            w(e.EV_KEY, b, v); out_btn[b] = v
+    if vis:
+        xy = (vis[0].x, vis[0].y)
+        if xy != out_xy:
+            out_xy = xy; w(e.EV_ABS, e.ABS_X, xy[0]); w(e.EV_ABS, e.ABS_Y, xy[1])
+        w(e.EV_ABS, e.ABS_PRESSURE, vis[0].p_raw)
+    if evs and ui:
+        for ev in evs:
+            ui.write(*ev)
+        ui.syn()
+
+def end_contact(c, t):
+    if c.hidden_reason and not c.ever_visible:
+        log(f"palm hidden reason={c.hidden_reason} dur={t - c.t0:.2f}s p={c.max_p:.0f} w={c.max_w:.1f}mm "
+            f"start=({100 * c.ox / XMAX:.0f}%,{100 * c.oy / YMAX:.0f}%)" if c.ox is not None else "palm hidden")
+    elif DEBUG:
+        log(f"finger dur={t - c.t0:.2f}s p={c.max_p:.0f} w={c.max_w:.1f}mm")
+
+dropping = False
+
+def pad_event(ev):
+    global cur, btn_left, dropping
+    t = ev.timestamp()
+    if ev.type == e.EV_SYN:
+        if ev.code == e.SYN_DROPPED:
+            dropping = True; return
+        if ev.code != e.SYN_REPORT:
+            return
+        if dropping:
+            dropping = False
+            for c in contacts.values(): end_contact(c, t)
+            contacts.clear(); emit_frame(); return
+        classify(t)
+        emit_frame()
+        for s, c in list(contacts.items()):
+            if c.tid == -1:
+                end_contact(c, t); del contacts[s]
+        return
+    if dropping:
+        return
+    if ev.type == e.EV_KEY and ev.code == e.BTN_LEFT:
+        btn_left = ev.value; return
+    if ev.type != e.EV_ABS:
+        return
+    if ev.code == e.ABS_MT_SLOT:
+        cur = ev.value
+    elif ev.code == e.ABS_MT_TRACKING_ID:
+        old = contacts.get(cur)
+        if ev.value == -1:
+            if old: old.tid = -1
+        else:
+            if old and old.tid != -1:
+                end_contact(old, t)
+            c = Contact(cur, ev.value, t)
+            c.x, c.y, c.p_raw, c.w_raw = slot_last.get(cur, (None, None, 0, 0))
+            contacts[cur] = c
+    elif ev.code in (e.ABS_MT_POSITION_X, e.ABS_MT_POSITION_Y, e.ABS_MT_PRESSURE, e.ABS_MT_TOUCH_MAJOR):
+        lx, ly, lp, lw = slot_last.get(cur, (None, None, 0, 0))
+        if ev.code == e.ABS_MT_POSITION_X: lx = ev.value
+        elif ev.code == e.ABS_MT_POSITION_Y: ly = ev.value
+        elif ev.code == e.ABS_MT_PRESSURE: lp = ev.value
+        else: lw = ev.value
+        slot_last[cur] = (lx, ly, lp, lw)
+        c = contacts.get(cur)
+        if c:
+            c.x, c.y, c.p_raw, c.w_raw = lx, ly, lp, lw
+
+def key_event(code, val, t):
+    global last_key
+    if val == 1 and code not in MODS:
+        last_key = t
+
+def main():
+    global RES, XMAX, YMAX, NSLOTS, ui
+    pad = kbd = None
+    for p in evdev.list_devices():
+        d = evdev.InputDevice(p)
+        if d.name == "Elan Touchpad" and pad is None:
+            pad = d
+        elif d.name == "cros_ec" and e.KEY_A in d.capabilities().get(e.EV_KEY, []) and kbd is None:
+            kbd = d
+        else:
+            d.close()
+    if not pad:
+        sys.exit("Elan Touchpad not found")
+    codes = (e.ABS_X, e.ABS_Y, e.ABS_PRESSURE, e.ABS_MT_SLOT, e.ABS_MT_POSITION_X, e.ABS_MT_POSITION_Y,
+             e.ABS_MT_TRACKING_ID, e.ABS_MT_PRESSURE, e.ABS_MT_TOUCH_MAJOR)
+    ai = {c: pad.absinfo(c) for c in codes}
+    RES = ai[e.ABS_MT_POSITION_X].resolution or 31
+    XMAX, YMAX = ai[e.ABS_MT_POSITION_X].max, ai[e.ABS_MT_POSITION_Y].max
+    NSLOTS = ai[e.ABS_MT_SLOT].max + 1
+    if not DRY:
+        caps = {e.EV_KEY: [e.BTN_LEFT, e.BTN_TOUCH] + TOOL_BTNS, e.EV_ABS: [(c, a) for c, a in ai.items()]}
+        ui = evdev.UInput(caps, name=pad.name + " (palm filter)", vendor=pad.info.vendor, product=pad.info.product,
+                          version=pad.info.version, bustype=pad.info.bustype,
+                          input_props=[e.INPUT_PROP_POINTER, e.INPUT_PROP_BUTTONPAD])
+        pad.grab()
+    syslog.openlog("quigon-palm-filter")
+    log(f"started{' (dry run)' if DRY else ''}: pad={pad.path} kbd={kbd.path if kbd else None} res={RES}/mm "
+        f"size={mm(XMAX):.0f}x{mm(YMAX):.0f}mm palm_pressure={PALM_PRESSURE} (raw>={PALM_PRESSURE / PRESSURE_SLOPE:.0f}) "
+        f"palm_width={PALM_WIDTH}mm edge={EDGE_MIN}-{EDGE_MAX}mm kbd_tap_timeout={KBD_TAP_TIMEOUT}s")
+    sel = selectors.DefaultSelector()
+    sel.register(pad, selectors.EVENT_READ, "pad")
+    if kbd:
+        sel.register(kbd, selectors.EVENT_READ, "kbd")
+    try:
+        while True:
+            for key, _ in sel.select():
+                for ev in key.fileobj.read():
+                    if key.data == "kbd":
+                        if ev.type == e.EV_KEY and ev.value in (0, 1):
+                            key_event(ev.code, ev.value, ev.timestamp())
+                    else:
+                        pad_event(ev)
+    finally:
+        if ui:
+            try: pad.ungrab()
+            except OSError: pass
+            ui.close()
+
+if __name__ == "__main__":
+    main()
