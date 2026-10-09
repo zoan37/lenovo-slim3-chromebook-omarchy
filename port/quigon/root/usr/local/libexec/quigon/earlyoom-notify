@@ -1,0 +1,10 @@
+#!/bin/bash
+# earlyoom -N hook: show which process was killed in every graphical session (EARLYOOM_NAME/PID/UID from earlyoom).
+msg="Memory was nearly full, so ${EARLYOOM_NAME:-a process} (pid ${EARLYOOM_PID:-?}) was closed to keep the desktop responsive."
+for dir in /run/user/*; do
+  uid=${dir##*/}; user=$(id -nu "$uid" 2>/dev/null) || continue
+  [[ -S $dir/bus ]] || continue
+  runuser -u "$user" -- env DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus \
+    notify-send -u critical -a "Low memory" "Closed ${EARLYOOM_NAME:-a process} to free memory" "$msg" 2>/dev/null &
+done
+wait
