@@ -42,3 +42,13 @@ itself worked (`mem_sleep` is `s2idle` only). Hyprland 0.56's Lua parser accepts
   again makes ACP drop the profile. Revisit with a display plugged in.
 - Result: sinks *Speaker* (default) and *Headphones*, sources *Internal Microphone* (default) and *Headset Microphone*, active
   profile HiFi. `pw-play` on the speaker exits cleanly; a 3 s internal-mic recording had peak 7673/32767.
+
+### Follow-ups
+
+- `Headphone Jack Switch` (machine-driver pin switch) is off at boot; it is now set in the Headphones device sequences.
+- `Ext_Speaker_Amp Switch` exists but writing it fails (`ASoC: DAPM unknown pin Ext_Speaker_Amp`, EINVAL) on this RT1019
+  board, and a failing cset aborts the device enable, so it must not be in the UCM. The speaker path powers up from the
+  route alone: during playback debugfs shows `DL0` → `I2SOUT1` → `audio-rt1019p` `SDB: On`, `Speaker: On`.
+- Apps started before `pipewire-pulse` existed (Chrome) have no audio connection until restarted.
+- ChromeOS's CRAS caps the speaker at -3.25 dB at 100% volume (`/etc/cras/quigon.rt1019.rt5682s/*.card_settings`,
+  explicit `db_at_N` curve), likely speaker protection. Not replicated yet.
