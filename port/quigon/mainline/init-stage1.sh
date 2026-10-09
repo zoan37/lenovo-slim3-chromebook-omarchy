@@ -120,21 +120,27 @@ else
   k "ROOT-C not mounted: $(cat /tmp/mnt.err 2>/dev/null)"
 fi
 
-# PCIe controller: loaded here under a timeout, with the driver's debug messages on. If the probe doesn't return,
-# record where every CPU is and stop feeding the watchdog: the reset keeps pstore (a power-off wouldn't).
+# PCIe controller (module, instrumented with numbered steps: see patches/mainline-pcie-gen3-qstep-debug.patch),
+# loaded under a timeout with the disk log running every second; quigon.qdelay=<ms> sets the pause after each step
+# (default 1500). If the link comes up, the MT7922 driver (mt7921e) follows.
 if [ -f /lib/modules/pcie-mediatek-gen3.ko ] && ! grep -q quigon.pcie=manual /proc/cmdline; then
-  echo 9 > /proc/sys/kernel/printk
-  k "pcie: insmod start"
-  insmod /lib/modules/pcie-mediatek-gen3.ko dyndbg=+p &
+  qd=$(sed -n 's/.*quigon\.qdelay=\([0-9]*\).*/\1/p' /proc/cmdline); qd=${qd:-1500}
+  blkbg pcie; k "pcie: insmod start (qdelay=$qd)"
+  insmod /lib/modules/pcie-mediatek-gen3.ko qdelay=$qd &
   ip=$!
-  i=0; while kill -0 $ip 2>/dev/null && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
+  i=0; while kill -0 $ip 2>/dev/null && [ $i -lt 40 ]; do sleep 1; i=$((i+1)); done
   if kill -0 $ip 2>/dev/null; then
-    k "pcie: insmod STUCK after 15 s; insmod stack: $(tr '\n' ';' < /proc/$ip/stack 2>/dev/null)"
-    echo l > /proc/sysrq-trigger; sleep 1; echo w > /proc/sysrq-trigger; sleep 1
-    k "pcie: stopping the watchdog feeder -> reset in ~31 s"
-    sync; killall -9 watchdog; sleep 120
+    k "pcie: insmod STUCK after 40 s; insmod stack: $(tr '\n' ';' < /proc/$ip/stack 2>/dev/null)"
+    blk "pcie stuck"; sync; killall -9 watchdog; sleep 120
   fi
-  k "pcie: insmod returned after $i s: $(dmesg | grep -i -E 'mtk-pcie|pcie|tphy' | tail -8 | tr '\n' ';' | cut -c1-900)"
+  k "pcie: insmod returned after $i s; devices: $(for d in /sys/bus/pci/devices/*; do [ -e "$d" ] && echo -n "$(basename $d) $(cat $d/vendor):$(cat $d/device); "; done)"
+  if [ -d /sys/bus/pci/devices/0000:01:00.0 ]; then
+    for m in mt76 mt76-connac-lib mt792x-lib mt7921-common mt7921e; do
+      [ -f /lib/modules/$m.ko ] && { insmod /lib/modules/$m.ko; k "pcie: insmod $m -> $?"; }
+    done
+    sleep 3; k "pcie: wifi: $(ls /sys/class/net | tr '\n' ' ') $(dmesg | grep -i mt7921e | tail -3 | tr '\n' ';' | cut -c1-500)"
+  fi
+  blk "pcie done"; blkbg_stop
 fi
 
 stay=20; [ -n "$netup" ] && stay=1200

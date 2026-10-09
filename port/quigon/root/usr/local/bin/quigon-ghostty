@@ -3,8 +3,12 @@
 # SSBOs) on the Mali Vulkan driver, with GL 4.3 reported (Ghostty's minimum; what Zink can't do here, fp64 and
 # multi-draw-indirect, Ghostty doesn't use). ghostty-gpu-preload.so adds dmabuf,offload to Ghostty's GDK_DISABLE and
 # strips these variables from what Ghostty execs. Without /etc/quigon/gpu.env it runs Ghostty unchanged (llvmpipe).
+# On the mainline kernel: llvmpipe. Panfrost tops out at GL 3.1 with no vertex SSBOs and PanVK doesn't support the
+# G57 yet, so there is no GPU path to GL 4.3 there.
 M=/opt/quigon-gpu/mesa-zink
-if [[ -f /etc/quigon/gpu.env && -e $M/lib/libgallium-26.2.4.so ]]; then
+if [[ $(uname -r) == *-quigon* ]]; then
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+elif [[ -f /etc/quigon/gpu.env && -e $M/lib/libgallium-26.2.4.so ]]; then
   unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE
   export __EGL_VENDOR_LIBRARY_FILENAMES=$M/share/glvnd/egl_vendor.d/50_mesa.json
   export LD_LIBRARY_PATH=$M/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

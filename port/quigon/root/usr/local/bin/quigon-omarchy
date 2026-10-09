@@ -7,17 +7,24 @@
 # through uwsm get Mesa OpenGL on the Mali via Zink by default; Qt Quick uses its software renderer (Qt Quick on Zink
 # crashed Quickshell: Zink can't export images on this driver); Mesa GBM stays software so Chromium/Electron fall back
 # cleanly. Chrome, Electron apps and Ghostty have their own quigon-* wrappers; GTK 4 uses the Mali Vulkan driver.
-# quigon-nozink <app> runs an app on llvmpipe. Software mode: everything on llvmpipe.
+# quigon-nozink <app> runs an app on llvmpipe. Software mode: everything on llvmpipe. On the mainline kernel
+# (release *-quigon*): stock Mesa on Panfrost, whatever gpu.env says.
 set -u
 cd "$HOME"
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export LIBSEAT_BACKEND=seatd SEATD_VTBOUND=0
-export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
-if [[ -f /etc/quigon/gpu.env ]]; then
+if [[ $(uname -r) == *-quigon* ]]; then
+  # Mainline kernel: mediatek-drm drives the panel (its card number isn't fixed: Panfrost may take card0) and Mesa
+  # renders on the Mali through Panfrost natively, so no libmali, Zink or software overrides at all.
+  AQ_DRM_DEVICES=$(readlink -f /dev/dri/by-path/platform-mediatek-drm*-card | head -1)
+  export AQ_DRM_DEVICES
+elif [[ -f /etc/quigon/gpu.env ]]; then
+  export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
   # SDL games default to X11 (Xwayland) when DISPLAY is set, and Zink under Xwayland crashes (DRI3 needs image
   # export); prefer Wayland, fall back to X11 for SDL builds without it.
   export MESA_LOADER_DRIVER_OVERRIDE=zink GBM_ALWAYS_SOFTWARE=1 QT_QUICK_BACKEND=software SDL_VIDEODRIVER=wayland,x11
 else
+  export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
   export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
 fi
 export XDG_SESSION_TYPE=wayland XDG_SEAT=${XDG_SEAT:-seat0}

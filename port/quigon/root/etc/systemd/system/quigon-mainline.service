@@ -1,0 +1,17 @@
+[Unit]
+Description=quigon: mainline-kernel mode (GPU through Mesa/Panfrost, not the libmali shims)
+# Only under the mainline test kernel (its release ends in -quigon / -quigon+); the ChromeOS kernel never matches.
+ConditionKernelVersion=*-quigon*
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target quigon-gpu-guard.service quigon-desktop.service systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Every GPU wrapper (Hyprland drop-in, quigon-chrome/-electron/-ghostty, the bar) keys off /etc/quigon/gpu.env.
+# Masking it makes them all run stock Mesa, which on mainline is Panfrost on the Mali: no shims needed.
+ExecStart=/bin/sh -c '[ -f /etc/quigon/gpu.env ] && mount --bind /dev/null /etc/quigon/gpu.env || true'
+
+[Install]
+WantedBy=sysinit.target

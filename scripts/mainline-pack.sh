@@ -4,7 +4,7 @@
 #   (google,obiwan-rev3-sku196620 / -sku196620 / google,obiwan; depthcharge picks the FIT config by these), copy it
 #   to the Chromebook and arm it in the boot-once slot (quigon-test-kernel). The next reboot runs it once.
 #   DTB=<name> picks another DTB from the build (default mt8189-quigon). The kernel's built-in initramfs does the test; afterwards `mainline-log` (scripts/mainline-log.sh) on the
-#   Chromebook shows its console from pstore.
+#   Chromebook shows its console from pstore. FULL=1 boots the Omarchy install (ROOT-C) on the mainline kernel instead.
 set -euo pipefail
 B=${1:?build dir}; tag=${2:?tag}; extra=${3:-}
 host=${QUIGON_HOST:-root@192.168.0.22}
@@ -47,7 +47,14 @@ cat > "$w/image.its" <<ITS
 };
 ITS
 (cd "$w" && dtc -q -I dts -O dtb -o image.fit image.its)
-echo "loglevel=8 ignore_loglevel panic=5 softlockup_panic=1 hung_task_panic=1 clk_ignore_unused pd_ignore_unused regulator_ignore_unused mtk_wdt.start_timeout=31 watchdog.open_timeout=20 irqchip.gicv3_pseudo_nmi=1 rdinit=/init printk.devkmsg=on quigon.test=$tag $extra" > "$w/cmdline"
+if [[ -n ${FULL:-} ]]; then
+  # FULL=1: boot the real Omarchy install on ROOT-C (sda7) instead of the test initramfs (rdinit points nowhere, so
+  # the kernel skips the embedded initramfs and mounts root= itself). No boot-time watchdog arming: nothing in
+  # Omarchy feeds it. The console still lands in pstore for mainline-log.
+  echo "console=tty0 loglevel=6 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused irqchip.gicv3_pseudo_nmi=1 rdinit=/quigon-no-initramfs init=/sbin/init root=/dev/sda7 rootwait rw systemd.gpt_auto=0 net.ifnames=0 lsm=capability,landlock,yama,bpf cma=256M quigon.test=$tag $extra" > "$w/cmdline"
+else
+  echo "loglevel=8 ignore_loglevel panic=5 softlockup_panic=1 hung_task_panic=1 clk_ignore_unused pd_ignore_unused regulator_ignore_unused mtk_wdt.start_timeout=31 watchdog.open_timeout=20 irqchip.gicv3_pseudo_nmi=1 rdinit=/init printk.devkmsg=on quigon.test=$tag $extra" > "$w/cmdline"
+fi
 ls -la "$w/image.fit" | awk '{print "FIT", $5, "bytes"}'
 scp -q "$w/image.fit" "$w/cmdline" "$host:/root/kern-backup/"
 ssh "$host" "mv /root/kern-backup/image.fit /root/kern-backup/$tag.fit && mv /root/kern-backup/cmdline /root/kern-backup/$tag.cmdline && quigon-test-kernel --vmlinuz /root/kern-backup/$tag.fit /root/kern-backup/$tag.cmdline"
