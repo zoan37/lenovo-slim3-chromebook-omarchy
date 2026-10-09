@@ -51,6 +51,19 @@ Ported from omarchy-setup (`hyprland-shell-tweaks.md`, `new-machine-checklist.md
     `systemctl restart ufw` (the boot path) → SSH, the bridge, and outgoing traffic all fine. A test HTTP server on 8765
     was unreachable from the LAN while 22 was reachable.
   - `ufw.service` enabled, `ENABLED=yes`.
+- **First reboot with ufw on (2026-10-09): only half the firewall loaded.** `ufw.service` runs `Before=sysinit.target`
+  (1.35 s into boot) and failed with "Extension conntrack is not supported" / "Couldn't load match `conntrack'".
+  `xt_conntrack` and `nf_conntrack` are modules, and iptables-legacy couldn't autoload them that early. The DROP
+  policies and the user rules (LAN SSH) loaded, so SSH worked, but ping and every reply to outgoing traffic (DNS,
+  HTTPS, NTP) were dropped. `systemctl restart ufw` didn't fix it ("Firewall already started"); `ufw reload` did. Fix:
+  - `/etc/modules-load.d/quigon-ufw.conf` (nf_conntrack, xt_conntrack)
+  - `ufw.service.d/10-quigon-modules.conf`: `After=systemd-modules-load.service`, `ExecStartPre=-modprobe -a …`,
+    `OnFailure=quigon-ufw-recover.service` (modprobe + `ufw reload`)
+  - quigon-doctor now checks for the conntrack rule in `ufw-before-input` (a half-loaded firewall still has
+    `ufw-user-input`), and with `--fix` reloads.
+  - Simulated boot (flush, `rmmod xt_conntrack nf_conntrack`, `systemctl restart ufw`): the modules load from
+    ExecStartPre and the full rule set comes up (ping, SSH, outbound HTTPS 200).
+  - Omarchy on the XPS isn't affected: its iptables is the nf_tables backend, and the kernel loads what nftables needs.
 - Limits on this kernel: no firewall logging, no `ufw limit` (needs `xt_recent`), and no multi-port rules like
   `allow 80,443/tcp` (needs `xt_multiport`). Use one rule per port, or ranges (`1000:2000/tcp` uses plain `--dport`). If
   a new rule makes ufw fail to load, `sudo ufw disable` at the keyboard restores the network. A kernel rebuild with

@@ -106,7 +106,14 @@ check_system() {
   else pass "ufw before6.rules loadable on this kernel"; fi
   grep -q '^LOGLEVEL=off' /etc/ufw/ufw.conf 2>/dev/null && pass "ufw logging off (no xt_LOG in this kernel)" || fail "ufw logging is on: the LOG target is missing here (sudo ufw logging off)"
   iptables -V 2>/dev/null | grep -q legacy && pass "iptables is the legacy backend" || fail "iptables is not iptables-legacy (this kernel has no nftables)"
-  iptables -S ufw-user-input >/dev/null 2>&1 && pass "firewall (ufw) active" || fail "firewall (ufw) not active (sudo ufw enable — test over SSH with an auto-revert)"
+  # A partial load (ufw.service failed: before.rules missing) still has ufw-user-input but drops all replies.
+  if iptables -S ufw-before-input 2>/dev/null | grep -q conntrack; then pass "firewall (ufw) active with its full rule set"
+  elif iptables -S ufw-user-input >/dev/null 2>&1; then
+    if (( FIX )); then modprobe -a nf_conntrack xt_conntrack && ufw reload >/dev/null && repaired "reloaded half-loaded firewall (conntrack was missing)"
+    else fail "firewall only half loaded (no conntrack rules: replies to outgoing traffic are dropped) — sudo ufw reload"; fi
+  else fail "firewall (ufw) not active (sudo ufw enable — test over SSH with an auto-revert)"; fi
+  [[ -f /etc/modules-load.d/quigon-ufw.conf && -f /etc/systemd/system/ufw.service.d/10-quigon-modules.conf ]] && pass "conntrack loaded before ufw at boot" ||
+    fail "ufw boot ordering drop-ins missing: at boot ufw loads before xt_conntrack and only half the firewall comes up"
   grep -q 'quigon/bar-env' /usr/bin/omarchy-launch-shell 2>/dev/null && pass "bar launcher picks its renderer (bar-env)" || { (( FIX )) && /usr/local/bin/fix-omarchy-launch-shell && repaired "re-applied bar launcher patch"; } || fail "omarchy-launch-shell not patched: the bar would inherit Zink and crash (sudo fix-omarchy-launch-shell)"
   if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
   elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
