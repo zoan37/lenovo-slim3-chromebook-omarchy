@@ -32,3 +32,9 @@ download with `curl -o file "$B/files/name"`.
   charger unplugged, hold ~10 s (no click), then plug the charger in.
 - The ChromeOS kernel has no VT or fbcon (`/dev/tty1` and `/dev/fb*` don't exist; ChromeOS uses frecon),
   so a booted Linux shows a black screen until something drives DRM. Debug over the network and from logs.
+
+## Before changing network or firewall settings
+
+The machine is headless from the bridge's point of view. Wrap anything that can cut the network (NetworkManager,
+ufw/iptables) in a detached unit that reverts automatically unless a check host stays reachable
+(see `scripts/switch-to-networkmanager.sh`). Enabling ufw without that once cut off SSH and the bridge.
