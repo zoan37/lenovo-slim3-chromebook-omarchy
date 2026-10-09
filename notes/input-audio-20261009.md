@@ -83,6 +83,10 @@ and GPU devfreq. SoC ~40–42 °C at light load.
   software VP9 decoder), GPU process 31% (libmali compositing), whole system 190% of 800%. Stats for nerds over 35.8 s
   of video: 2260 frames (~63 fps), 4 dropped. Smooth, but costs ~1.2+ cores. 1080p60 would be ~2.25× the pixels.
   Power not measured (on the charger, battery full).
+- **Same video forced to 1080p60** (itag 303, VP9, same small player), 30 s fully playing: renderer **178%** of a core,
+  GPU process 43%, whole system 283% of 800%. Big cores at 2.6 GHz, SoC 54.8 °C. Stats for nerds: 1882 frames in
+  31.4 s of video (60 fps), **21 dropped (1.1%)** versus 0.2% at 720p. Keeps up, but it's close to what software can do;
+  the hardware decoder would take most of that ~1.8 cores off the CPU.
 - Possible later: GStreamer's `v4l2codecs` (gst-plugins-bad) handles MM21, for GStreamer-based players only.
 
 ## Quick hardware checks (2026-10-09)
