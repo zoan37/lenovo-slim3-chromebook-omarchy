@@ -83,6 +83,9 @@ check_system() {
   [[ -f /usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/HiFi.conf ]] && pass "UCM2 profile for mt8189_1019_rt5682s" || fail "UCM2 profile missing (port/quigon/root/usr/share/alsa/ucm2)"
 
   section "Omarchy patches"
+  local qs; qs=$(pacman -Q quickshell 2>/dev/null | awk '{print $2}')
+  if grep -q '^IgnorePkg.*quickshell' /etc/pacman.conf && [[ $qs == 0.3.1* ]]; then pass "quickshell $qs pinned (0.3.2 breaks re-locking)"
+  else fail "quickshell is $qs / not pinned: 0.3.2 never releases the session lock, so later locks (and lock-before-sleep) fail"; fi
   if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
   elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
   else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi

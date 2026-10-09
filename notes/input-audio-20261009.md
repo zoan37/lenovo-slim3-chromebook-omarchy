@@ -101,3 +101,18 @@ suspend_stats 2/0. Two problems:
   profile; [`quigon-wifi-resume`](../port/quigon/root/usr/lib/systemd/system-sleep/quigon-wifi-resume) system-sleep hook
   rescans and reconnects if wlan0 isn't connected 15 s after resume (detached; `/usr/lib/systemd/system-sleep/` because
   systemd 261 ignores `/etc`).
+
+### Lock before sleep: Quickshell 0.3.2 regression (fixed by pinning 0.3.1)
+
+The unlocked-sleep wasn't timing. After the first unlock (23:21:59), the bar's `lock status` read `"locked":true` while
+`requested`, `sessionLocked` and `secure` were all false — but `locked` is defined in Omarchy's lock service as
+`lockRequested || sessionLock.locked || sessionLock.secure`. The unlock had logged `secure=false` and `unlocked` but never
+`session-locked=false`: `WlSessionLock`'s lock-state change never arrived, so the binding stayed stale. The IPC `lock()`
+then saw `root.locked` and returned "ok" without locking, and `omarchy-system-sleep-lock` polled for `secure` until its
+12 s budget ran out. Every lock after the first unlock silently failed until the bar restarted.
+
+The XPS 13 (Omarchy rc, **Quickshell 0.3.1**) logs `secure=false`, `session-locked=false` ×2, `unlocked` and returns to
+`locked:false`. The Chromebook had **0.3.2-2** from Omarchy's aarch64 edge repo (built 2026-10-08). Downgraded to ALARM
+`extra/quickshell 0.3.1-1` and pinned (`IgnorePkg = quickshell` in pacman.conf and the guard's known-good copy;
+quigon-doctor checks it). User test: lock → unlock → lock → unlock now logs exactly the XPS sequence twice and ends at
+`locked:false`. Worth reporting upstream (Quickshell 0.3.2 / Omarchy edge).
