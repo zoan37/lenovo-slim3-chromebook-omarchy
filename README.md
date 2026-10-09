@@ -18,8 +18,10 @@ Experimental device port, not an installer.
 |---|---|
 | Developer mode | Done 2026-10-08 |
 | Recon (kernel, GPU, Wi-Fi, storage) | Done: [notes/recon-20261008.md](notes/recon-20261008.md) |
-| Arch Linux ARM booting from USB on the ChromeOS kernel | In progress |
-| Display (mediatek-drm KMS), input, Wi-Fi (mt7921e) | Not started |
+| Arch Linux ARM booting from USB on the ChromeOS kernel | **Works** (2026-10-08, first try): systemd `running`, no failed units, Wi-Fi + DHCP, SSH, bridge. [notes/usb-boot-20261008.md](notes/usb-boot-20261008.md) |
+| Input | Detected: Elan touchpad, cros_ec keyboard + buttons, tc3408 touchscreen, headset/HDMI/DP jacks |
+| Display (mediatek-drm KMS) | eDP-1 present but nothing drives it yet (no VT/fbcon) |
+| Audio, Bluetooth, battery | Audio card `mt8189_1019_rt5682s` probes; BT `hci0` up; battery reads (`sbs-battery`) — not tested further |
 | Hyprland + Omarchy | Not started |
 | GPU (Mali-G57 on kbase r54p1) | Not started: port the phone's Mesa panfrost-kbase patches, or try ChromeOS's `libmali.so` |
 
