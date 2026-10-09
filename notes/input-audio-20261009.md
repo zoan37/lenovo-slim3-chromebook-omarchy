@@ -64,3 +64,17 @@ logind default; Omarchy's idle: screensaver 150 s, lock 300 s (same as the other
 
 Fanless: `cros_ec` hwmon exposes fan1–4 but all read 0 rpm with no fault; cooling devices are only cpufreq (cpu0, cpu6)
 and GPU devfreq. SoC ~40–42 °C at light load.
+
+## Hardware video decoding: not reachable from Linux Chrome
+
+- `/dev/video5` `mtk-vcodec-dec` ("MT8189 video decoder", media device `/dev/media1`): **stateless** H.264 (`S264`),
+  VP9 (`VP9F`), HEVC (`S265`); no AV1. Output (capture) format is **only `MM21`** (MediaTek 8-bit block-tiled).
+- Linux Chrome only has VA-API decode (no ChromeOS-style V4L2 path). Omarchy's aarch64 repo has
+  `libva-v4l2_request-avd` (VA-API on V4L2 stateless decoders, Asahi AVD fork): `vainfo` with
+  `LIBVA_DRIVER_NAME=v4l2_request LIBVA_V4L2_REQUEST_VIDEO_PATH=/dev/video5 LIBVA_V4L2_REQUEST_MEDIA_PATH=/dev/media1`
+  lists H.264 CB/Main/High, HEVC Main/Main10, VP9 0/2, but every decode fails at once (ffmpeg `-hwaccel vaapi`: thread
+  error -1145393733) because the driver can't produce frames from `MM21`. ChromeOS's Chrome converts MM21 with its own
+  image processor.
+- Software cost is small anyway: ffmpeg 1080p30 10 s clip, 8 threads — VP9 3.6 CPU-s (≈0.36 core), H.264 4.2 CPU-s.
+  Packages left installed (`libva-v4l2_request-avd`, `libva-utils`, `v4l-utils`) are harmless; nothing sets them up.
+- Possible later: GStreamer's `v4l2codecs` (gst-plugins-bad) handles MM21, for GStreamer-based players only.
