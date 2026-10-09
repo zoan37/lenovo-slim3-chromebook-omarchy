@@ -20,10 +20,10 @@ Experimental device port, not an installer.
 | Recon (kernel, GPU, Wi-Fi, storage) | Done: [notes/recon-20261008.md](notes/recon-20261008.md) |
 | Arch Linux ARM booting from USB on the ChromeOS kernel | **Works** (2026-10-08, first try): systemd `running`, no failed units, Wi-Fi + DHCP, SSH, bridge. [notes/usb-boot-20261008.md](notes/usb-boot-20261008.md) |
 | Input | Detected: Elan touchpad, cros_ec keyboard + buttons, tc3408 touchscreen, headset/HDMI/DP jacks |
-| Display (mediatek-drm KMS) | eDP-1 present but nothing drives it yet (no VT/fbcon) |
+| Display (mediatek-drm KMS) | Hyprland drives eDP-1 at 1920×1200@60 |
 | Audio, Bluetooth, battery | Audio card `mt8189_1019_rt5682s` probes; BT `hci0` up; battery reads (`sbs-battery`) — not tested further |
-| Hyprland + Omarchy | Not started |
-| GPU (Mali-G57 on kbase r54p1) | Not started: port the phone's Mesa panfrost-kbase patches, or try ChromeOS's `libmali.so` |
+| Hyprland + Omarchy | **Works**: Omarchy 4.0.4 (official aarch64 `edge` packages), uwsm session on seat0, NetworkManager: [notes/desktop-20261008.md](notes/desktop-20261008.md) |
+| GPU (Mali-G57 on kbase r54p1) | **Compositor on the GPU** via ChromeOS's own `libmali` r54p1 + a RELR patch + an EGL shim: [notes/gpu-20261008.md](notes/gpu-20261008.md). Apps still on llvmpipe |
 
 ## Layout
 
