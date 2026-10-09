@@ -1,0 +1,15 @@
+[Unit]
+Description=Hyprland on the built-in display (no VT on the ChromeOS kernel)
+Requires=seatd.service
+After=seatd.service systemd-user-sessions.service user@1000.service
+
+[Service]
+User=alarm
+ExecStart=/usr/local/bin/quigon-hyprland
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

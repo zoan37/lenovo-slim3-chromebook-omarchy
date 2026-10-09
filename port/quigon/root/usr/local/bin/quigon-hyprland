@@ -1,0 +1,15 @@
+#!/bin/bash
+# Hyprland directly on mediatek-drm (eDP-1), software rendering (llvmpipe through Mesa's kms_swrast GBM,
+# dumb buffers) until the Mali/kbase path works. Runs as the desktop user from quigon-desktop.service.
+set -u
+cd "$HOME"
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export LANG=C.UTF-8
+export LIBSEAT_BACKEND=seatd SEATD_VTBOUND=0
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
+export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
+export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Hyprland XDG_SESSION_DESKTOP=Hyprland
+export QT_QPA_PLATFORM=wayland GDK_BACKEND=wayland SDL_VIDEODRIVER=wayland
+unset WAYLAND_DISPLAY DISPLAY
+[[ -f $HOME/.config/quigon/desktop.env ]] && source "$HOME/.config/quigon/desktop.env"
+exec dbus-run-session Hyprland
