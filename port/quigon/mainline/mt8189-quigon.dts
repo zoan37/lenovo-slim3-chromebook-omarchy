@@ -5,7 +5,8 @@
  *
  * mt8189-pinfunc.h is ChromeOS's (the mainline pinmux header patch isn't merged yet).
  *
- * Stage 3 (GPU): MFG clock + power domains + Panfrost node (OPPs limited to the lowest six for bring-up).
+ * Storage: UFS (from ChromeOS), so test kernels can use Omarchy's root read-only.
+ * Stage 3 (GPU): MFG clock + power domains + Panfrost node (ChromeOS's full OPP table, SRAM rail fixed at 900 mV).
  *
  * Stage 1: CPUs, GIC, timer, clocks, pinctrl, power domains, watchdog, PCIe + MT7921 Wi-Fi, MT6359 PMIC (on the pwrap; MT6319 on SPMI for
  * the big cores isn't described yet, firmware sets it up). No UART is reachable without a SuzyQ cable,
@@ -17,6 +18,7 @@
 #include "mt6359.dtsi"
 #include "mt8189-pinfunc.h"
 #include <dt-bindings/clock/mediatek,mt8189-clk.h>
+#include <dt-bindings/reset/mediatek,mt8189-resets.h>
 
 / {
 	model = "Google Quigon (Lenovo IdeaPad Slim 3 Chromebook)";
@@ -50,7 +52,7 @@
 		};
 	};
 
-	/* Bring-up: the lowest six of ChromeOS's GPU OPPs (390-560 MHz, <= 693.75 mV). */
+	/* ChromeOS's GPU OPP table (390-1100 MHz); vsram_proc1 is fixed at 900 mV (see below). */
 	gpu_opp_table: opp-table-gpu {
 		compatible = "operating-points-v2";
 		opp-shared;
@@ -78,6 +80,58 @@
 		opp-560000000 {
 			opp-hz = /bits/ 64 <560000000>;
 			opp-microvolt = <693750>;
+		};
+		opp-595000000 {
+			opp-hz = /bits/ 64 <595000000>;
+			opp-microvolt = <693750>;
+		};
+		opp-630000000 {
+			opp-hz = /bits/ 64 <630000000>;
+			opp-microvolt = <700000>;
+		};
+		opp-665000000 {
+			opp-hz = /bits/ 64 <665000000>;
+			opp-microvolt = <700000>;
+		};
+		opp-700000000 {
+			opp-hz = /bits/ 64 <700000000>;
+			opp-microvolt = <700000>;
+		};
+		opp-736000000 {
+			opp-hz = /bits/ 64 <736000000>;
+			opp-microvolt = <718750>;
+		};
+		opp-772000000 {
+			opp-hz = /bits/ 64 <772000000>;
+			opp-microvolt = <737500>;
+		};
+		opp-808000000 {
+			opp-hz = /bits/ 64 <808000000>;
+			opp-microvolt = <756250>;
+		};
+		opp-844000000 {
+			opp-hz = /bits/ 64 <844000000>;
+			opp-microvolt = <775000>;
+		};
+		opp-880000000 {
+			opp-hz = /bits/ 64 <880000000>;
+			opp-microvolt = <793750>;
+		};
+		opp-935000000 {
+			opp-hz = /bits/ 64 <935000000>;
+			opp-microvolt = <818750>;
+		};
+		opp-990000000 {
+			opp-hz = /bits/ 64 <990000000>;
+			opp-microvolt = <850000>;
+		};
+		opp-1045000000 {
+			opp-hz = /bits/ 64 <1045000000>;
+			opp-microvolt = <875000>;
+		};
+		opp-1100000000 {
+			opp-hz = /bits/ 64 <1100000000>;
+			opp-microvolt = <900000>;
 		};
 	};
 
@@ -109,6 +163,47 @@
 			reg = <0 0x13fbf000 0 0x1000>;
 			power-domains = <&spm MT8189_POWER_DOMAIN_MFG1>;
 			#clock-cells = <1>;
+		};
+
+		/*
+		 * Internal storage: UFS host, from ChromeOS (the generic mt8183 binding mainline's ufs-mediatek handles). The
+		 * clocks and resets come from the Genio series' ufscfg-ao/-pdn controllers (unlabelled there: path refs).
+		 */
+		ufshci: ufshci@112b0000 {
+			compatible = "mediatek,mt8183-ufshci";
+			reg = <0 0x112b0000 0 0x2300>;
+			interrupts = <GIC_SPI 393 IRQ_TYPE_LEVEL_HIGH 0>;
+			clocks = <&topckgen CLK_TOP_U_SEL>,
+				 <&clk26m>,
+				 <&topckgen CLK_TOP_MSDCPLL_D2>,
+				 <&topckgen CLK_TOP_AES_UFSFDE_SEL>,
+				 <&topckgen CLK_TOP_U_MBIST_SEL>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_UNIPRO_TX_SYM>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_UNIPRO_RX_SYM0>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_UNIPRO_RX_SYM1>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_UNIPRO_SYS>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_U_SAP_CFG>,
+				 <&{/soc/clock-controller@112b8000} CLK_UFSCFG_AO_REG_U_PHY_TOP_AHB_S_BUS>,
+				 <&{/soc/clock-controller@112bb000} CLK_UFSCFG_REG_UFSHCI_UFS>,
+				 <&{/soc/clock-controller@112bb000} CLK_UFSCFG_REG_UFSHCI_AES>,
+				 <&{/soc/clock-controller@112bb000} CLK_UFSCFG_REG_UFSHCI_U_AHB>,
+				 <&{/soc/clock-controller@112bb000} CLK_UFSCFG_REG_UFSHCI_U_AXI>;
+			clock-names = "ufs_sel", "ufs_sel_min_src", "ufs_sel_max_src", "ufs_fde", "ufs_mbist",
+				      "unipro_tx_sym", "unipro_rx_sym0", "unipro_rx_sym1", "unipro_sys", "unipro_phy_sap",
+				      "phy_top_ahb_s_bus", "ufshci_ufs", "ufshci_aes", "ufshci_ufs_ahb", "ufshci_aes_axi";
+			freq-table-hz = <26000000 208000000>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>,
+					<0 0>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>;
+			vcc-supply = <&mt6359_vemc_1_ldo_reg>;
+			vccq-supply = <&mt6359_vio18_ldo_reg>;
+			vccq2-supply = <&mt6359_vufs_ldo_reg>;
+			resets = <&{/soc/clock-controller@112bb000} MT8189_UFSPDN_RST_UFS_UNIPRO>,
+				 <&{/soc/clock-controller@112bb000} MT8189_UFSPDN_RST_UFS_CRYPTO>,
+				 <&{/soc/clock-controller@112bb000} MT8189_UFSPDN_RST_UFS_HCI>,
+				 <&{/soc/clock-controller@112b8000} MT8189_UFSAO_RST_UFS_MPHY>;
+			reset-names = "unipro_rst", "crypto_rst", "hci_rst", "mphy_rst";
+			mediatek,ufs-disable-mcq;
+			mediatek,ufs-rtff-mtcmos;
+			mediatek,ufs-broken-vcc;
 		};
 
 		watchdog: watchdog@1c00a000 {
@@ -193,17 +288,20 @@
 };
 
 /*
- * ChromeOS skywalker: GPU core and SRAM rails. ChromeOS couples them; mainline's mtk-regulator-coupler rejects these
- * (vproc1: "failed to get coupler: -ENOTSUPP", which fails the whole MT6359 regulator probe), so no coupling for now:
- * with the OPPs capped at 693.75 mV and the SRAM rail >= 750 mV, SRAM always stays above the core rail.
+ * ChromeOS skywalker: GPU core and SRAM rails. ChromeOS couples them. In mainline, mtk-regulator-coupler only
+ * attaches to names containing "vgpu"/"sram" (the stock "vproc1" fails -ENOTSUPP and takes the whole MT6359 regulator
+ * probe down), and when it does attach, powering MFG1 fails -EPERM (s3e). So: no coupling, SRAM fixed at its 900 mV
+ * maximum, which keeps it >= the core rail at every OPP (the only thing the coupling guarantees).
  */
 &mt6359_vproc1_buck_reg {
+	regulator-name = "buck_vgpu";
 	regulator-min-microvolt = <550000>;
 	regulator-max-microvolt = <900000>;
 };
 
 &mt6359_vsram_proc1_ldo_reg {
-	regulator-min-microvolt = <750000>;
+	regulator-name = "ldo_sram_gpu";
+	regulator-min-microvolt = <900000>;
 	regulator-max-microvolt = <900000>;
 };
 

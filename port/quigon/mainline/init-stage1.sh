@@ -6,6 +6,7 @@
 # without Wi-Fi it reboots after 20 s. The hardware watchdog (30 s) covers a hang either way.
 # Build-host-only files, never in the repo: /etc/wpa_supplicant/wpa_supplicant.conf (Wi-Fi credentials) and
 # /root/.ssh/authorized_keys.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 mount -t proc proc /proc; mount -t sysfs sys /sys; mount -t devtmpfs dev /dev 2>/dev/null
 mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
 mkdir -p /dev/pts /run /tmp; mount -t devpts devpts /dev/pts; mount -t tmpfs tmpfs /run; mount -t tmpfs tmpfs /tmp
@@ -31,9 +32,28 @@ k "regulators: $(ls /sys/class/regulator | wc -l): $(cat /sys/class/regulator/*/
 k "gpu: $(dmesg | grep -i -E 'panfrost|mali|13000000.gpu|mfgcfg' | tail -10 | tr '\n' ';' | cut -c1-950)"
 k "gpu: dri=[$(ls /dev/dri 2>/dev/null | tr '\n' ' ')] devfreq=[$(cat /sys/class/devfreq/*gpu*/cur_freq /sys/class/devfreq/*gpu*/available_frequencies 2>/dev/null | tr '\n' ' ')] mfg_bg3d=$(grep -E ' mfg_bg3d | mfg_sel_mfgpll ' /sys/kernel/debug/clk/clk_summary 2>/dev/null | tr -s ' ' | tr '\n' ';')"
 k "gpu: pm domains: $(grep -E 'mfg' /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null | tr -s ' ' | tr '\n' ';')"
-k "gpu: regulators: vproc1=$(cat /sys/class/regulator/*/name 2>/dev/null | grep -c vproc1) $(for r in /sys/class/regulator/*; do n=$(cat $r/name 2>/dev/null); case $n in vproc1|vsram_proc1) echo -n "$n=$(cat $r/microvolts 2>/dev/null)uV/$(cat $r/state 2>/dev/null) ";; esac; done)"
+k "cpufreq: $(for p in /sys/devices/system/cpu/cpufreq/policy*; do echo -n "$(basename $p) $(cat $p/scaling_governor 2>/dev/null) cur=$(cat $p/scaling_cur_freq 2>/dev/null) max=$(cat $p/cpuinfo_max_freq 2>/dev/null); "; done)"
+k "gpu: regulators: $(for r in /sys/class/regulator/*; do n=$(cat $r/name 2>/dev/null); case $n in buck_vgpu|ldo_sram_gpu|vproc1|vsram_proc1) echo -n "$n=$(cat $r/microvolts 2>/dev/null)uV/$(cat $r/state 2>/dev/null) ";; esac; done)"
 k "pci: $(for d in /sys/bus/pci/devices/*; do [ -e "$d" ] && echo -n "$(basename "$d") $(cat "$d/vendor"):$(cat "$d/device"); "; done)"
 k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), pm domains: $(grep -c . /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null)"
+
+# Internal storage (UFS) and a GPU test with Omarchy's own Mesa: ROOT-C mounted read-only *without journal replay*
+# (noload), so the test kernel never writes to the real install.
+i=0; while [ ! -b /dev/sda7 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
+k "ufs: $(dmesg | grep -i -E 'ufs|scsi|sd[a-z]' | tail -8 | tr '\n' ';' | cut -c1-900)"
+k "partitions: $(awk 'NR>2{printf "%s(%s) ", $4, $3}' /proc/partitions | cut -c1-500)"
+if [ -b /dev/sda7 ] && mount -t ext4 -o ro,noload /dev/sda7 /mnt 2>/tmp/mnt.err; then
+  k "ROOT-C mounted read-only: $(head -c 120 /mnt/etc/os-release | tr '\n' ' ')"
+  for d in dev proc sys; do mount --bind /$d /mnt/$d; done
+  mount -t tmpfs tmpfs /mnt/tmp; mount -t tmpfs tmpfs /mnt/run
+  k "gpu test: eglinfo: $(chroot /mnt /usr/bin/eglinfo -B -p surfaceless 2>&1 | grep -i -E 'renderer|version string|vendor' | head -6 | tr '\n' ';' | cut -c1-900)"
+  k "gpu test: gles-bench (Panfrost): $(timeout 120 chroot /mnt env BENCH_SURFACELESS=1 /usr/local/bin/gles-bench 2>&1 | tr '\n' ';' | cut -c1-900)"
+  k "gpu test: devfreq after: cur=$(cat /sys/class/devfreq/*gpu*/cur_freq 2>/dev/null) trans=$(cat /sys/class/devfreq/*gpu*/trans_stat 2>/dev/null | tail -1); regs: $(for r in /sys/class/regulator/*; do n=$(cat $r/name); case $n in buck_vgpu|ldo_sram_gpu) echo -n "$n=$(cat $r/microvolts) ";; esac; done)"
+  k "gpu test: panfrost after: $(dmesg | grep -i panfrost | tail -4 | tr '\n' ';' | cut -c1-600)"
+  sync; umount /mnt/run /mnt/tmp /mnt/sys /mnt/proc /mnt/dev; umount /mnt
+else
+  k "ROOT-C not mounted: $(cat /tmp/mnt.err 2>/dev/null)"
+fi
 
 # PCIe controller: loaded here under a timeout, with the driver's debug messages on. If the probe doesn't return,
 # record where every CPU is and stop feeding the watchdog: the reset keeps pstore (a power-off wouldn't).

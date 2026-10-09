@@ -50,7 +50,7 @@ Experimental device port, not an installer.
   (pinctrl; base clocks at [v6, 2026-09](https://ratatoskr.run/linux-arm-kernel/2026/09/17515358/t), with
   multimedia/GPU clocks split out for later; MediaTek's Genio 520/720 IoT boards use the same SoC family). Velvet OS
   tracks Skywalker mainlining in [imagebuilder#448](https://github.com/velvet-os/imagebuilder/issues/448).
-  **Panfrost probes the Mali-G57 on mainline (2026-10-09).** Started 2026-10-09: survey and staged plan in [notes/mainline-20261009.md](notes/mainline-20261009.md) (64 posted
+  **Mainline now runs Mesa on Panfrost (Mali-G57 MC2, within ~4% of libmali on shader work), UFS and cpufreq (2026-10-09).** Started 2026-10-09: survey and staged plan in [notes/mainline-20261009.md](notes/mainline-20261009.md) (64 posted
   MT8189 series; GPU close to Panfrost's existing MT8370 support; test kernels boot-once from KERN-B with fallback). That's also the path to Omarchy supporting ARM Chromebooks
   officially (Omarchy's aarch64 `edge` packages already run here; the closed libmali stack can't be redistributed).
 - **Rebuild the ChromeOS kernel** (`chromeos-6.6`, obiwan/quigon config) with: `CONFIG_DISK_BASED_SWAP` (disk swap is
