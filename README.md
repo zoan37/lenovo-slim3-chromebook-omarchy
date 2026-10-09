@@ -39,6 +39,15 @@ Experimental device port, not an installer.
 
 ## To do
 
+- **Hardware video decode in Chrome (priority).** The decoder (`/dev/video5`, stateless H.264/VP9/HEVC, 4.x levels)
+  only outputs MediaTek's tiled `MM21`. Linux Chrome arm64 has VA-API decode built in (`VaapiVideoDecoder`,
+  `vaExportSurfaceHandle`) but no V4L2 decoder. Plan: teach the VA-API-on-V4L2 driver (`libva-v4l2_request`, already
+  in Omarchy's repo and lists the right profiles, but fails on MM21) to detile MM21 into NV12. Do it on the CPU with
+  NEON first, GPU later, and export the NV12 surface as a dma-buf for Chrome. Then run Chrome with VA-API forced on a
+  non-Mesa driver (`VaapiVideoDecoder`, `VaapiIgnoreDriverChecks`, `AcceleratedVideoDecodeLinuxGL`). No AV1 in this
+  hardware, so YouTube has to be steered to VP9 (e.g. by turning off AV1 decode). Measure first: YouTube dropped frames
+  and CPU at 1080p30/60 in software (ffmpeg baseline: 1080p30 VP9 ≈0.36 core). GStreamer's `v4l2codecs` already
+  handles MM21 for GStreamer-based players (local files).
 - **The real fix: mainline kernel + open GPU driver (project).** Everything GPU-related here bridges ChromeOS's
   closed `libmali` to desktop Linux (EGL shim, minigbm, Zink, per-app wrappers, the bar on software). With a mainline
   kernel that knows MT8189 plus Panfrost for the Mali-G57 (Mesa's Panfrost is already conformant on G57, e.g. MT8195),
