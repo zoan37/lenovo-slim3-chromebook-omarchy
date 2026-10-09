@@ -1,20 +1,28 @@
 #!/bin/bash
-# Ghostty on the Mali-G57: a private Mesa (/opt/quigon-gpu/mesa-zink, zink only, patched to keep read-only vertex
-# SSBOs) on the Mali Vulkan driver, with GL 4.3 reported (Ghostty's minimum; what Zink can't do here, fp64 and
-# multi-draw-indirect, Ghostty doesn't use). ghostty-gpu-preload.so adds dmabuf,offload to Ghostty's GDK_DISABLE and
-# strips these variables from what Ghostty execs. Without /etc/quigon/gpu.env it runs Ghostty unchanged (llvmpipe).
-# On the mainline kernel: llvmpipe. Panfrost tops out at GL 3.1 with no vertex SSBOs and PanVK doesn't support the
-# G57 yet, so there is no GPU path to GL 4.3 there.
-M=/opt/quigon-gpu/mesa-zink
-if [[ $(uname -r) == *-quigon* ]]; then
-  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
-elif [[ -f /etc/quigon/gpu.env && -e $M/lib/libgallium-26.2.4.so ]]; then
+# Ghostty on the Mali-G57 (Ghostty needs GL 4.3, with storage buffers read in its vertex shader).
+# - ChromeOS kernel + /etc/quigon/gpu.env: a private Mesa (/opt/quigon-gpu/mesa-zink, zink only, patched to keep
+#   read-only vertex SSBOs) on the Mali Vulkan driver, with GL 4.3 reported (what Zink can't do here, fp64 and
+#   multi-draw-indirect, Ghostty doesn't use).
+# - Mainline kernel: a private Panfrost Mesa (/opt/quigon-gpu/mesa-panfrost, scripts/build-mesa-panfrost.sh) that
+#   allows read-only vertex SSBOs with PAN_RO_VERTEX_SSBO=1, GL 4.3 reported; llvmpipe if it isn't installed.
+# ghostty-gpu-preload.so adds dmabuf,offload to Ghostty's GDK_DISABLE and strips these variables from what Ghostty
+# execs. Otherwise (GPU mode off) Ghostty runs unchanged.
+Z=/opt/quigon-gpu/mesa-zink P=/opt/quigon-gpu/mesa-panfrost
+gpu() {
   unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE
-  export __EGL_VENDOR_LIBRARY_FILENAMES=$M/share/glvnd/egl_vendor.d/50_mesa.json
-  export LD_LIBRARY_PATH=$M/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export __EGL_VENDOR_LIBRARY_FILENAMES=$1/share/glvnd/egl_vendor.d/50_mesa.json
+  export LD_LIBRARY_PATH=$1/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   export LD_PRELOAD=/opt/quigon-gpu/lib/ghostty-gpu-preload.so${LD_PRELOAD:+:$LD_PRELOAD}
-  export MESA_LOADER_DRIVER_OVERRIDE=zink MESA_GL_VERSION_OVERRIDE=4.3 MESA_GLSL_VERSION_OVERRIDE=430
-  export QUIGON_ZINK_RO_VERTEX_SSBO=1
+  export MESA_GL_VERSION_OVERRIDE=4.3 MESA_GLSL_VERSION_OVERRIDE=430
+}
+if [[ $(uname -r) == *-quigon* ]]; then
+  if [[ -e $P/lib/libgallium-26.2.4.so ]]; then
+    gpu $P; export PAN_RO_VERTEX_SSBO=1
+  else
+    export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+  fi
+elif [[ -f /etc/quigon/gpu.env && -e $Z/lib/libgallium-26.2.4.so ]]; then
+  gpu $Z; export MESA_LOADER_DRIVER_OVERRIDE=zink QUIGON_ZINK_RO_VERTEX_SSBO=1
   export SDL_VIDEODRIVER=wayland,x11   # kept for programs started in the terminal (Zink under Xwayland crashes)
 fi
 exec /usr/bin/ghostty "$@"

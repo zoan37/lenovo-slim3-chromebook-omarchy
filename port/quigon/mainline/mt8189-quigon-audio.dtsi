@@ -11,7 +11,8 @@
  *   Headset: Realtek RT5682S on I2C2 @ 0x1a, IRQ on GPIO 4 (HP_INT_ODL), I2SOUT0/I2SIN0 (I2SIN0 shares I2SOUT0's clocks,
  *     the driver default). Clocked from BCLK through its PLL (the machine driver's rtxxxx ops), so no MCLK clock.
  *   Speakers: Realtek RT1019P (GPIO-only amp, rt1015p driver), SDB on GPIO 5 (EN_SPKR), on I2SOUT1.
- *   Internal mic: SoC DMIC on the DMIC1 pins (GPIO 122/123) -> AP_DMIC_CH34 (obiwan has no AP_DMIC_BE link in ChromeOS).
+ *   Internal mic: SoC DMIC; both pairs are linked (AP_DMIC_BE on DMIC0, GPIO 119/120, and AP_DMIC_CH34_BE on DMIC1,
+ *     GPIO 122/123); the UCM profile captures from the first.
  *   Card: mainline's mt8189-nau8825 machine driver, "mediatek,mt8189-rt5682s" variant (ChromeOS: "...-rt5682s-sound").
  *     The card MUST have audio-routing: without it the common MediaTek probe takes the "legacy" path and ignores the
  *     dai-link nodes (every BE gets the dummy codec). Model name kept as ChromeOS's.
@@ -77,6 +78,15 @@
 
 			codec {
 				sound-dai = <&rt5682s 0>;
+			};
+		};
+
+		/* both DMIC pairs: ChromeOS's UCM profile (also used here) captures the internal mic from the first */
+		dai-link-4 {
+			link-name = "AP_DMIC_BE";
+
+			codec {
+				sound-dai = <&dmic_codec>;
 			};
 		};
 

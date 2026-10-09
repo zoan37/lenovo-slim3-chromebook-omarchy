@@ -1,0 +1,485 @@
+diff --git a/Documentation/devicetree/bindings/media/mediatek,vcodec-subdev-decoder.yaml b/Documentation/devicetree/bindings/media/mediatek,vcodec-subdev-decoder.yaml
+index d1d209cbb..b4f1c9a9f 100644
+--- a/Documentation/devicetree/bindings/media/mediatek,vcodec-subdev-decoder.yaml
++++ b/Documentation/devicetree/bindings/media/mediatek,vcodec-subdev-decoder.yaml
+@@ -75,6 +75,7 @@ properties:
+       - mediatek,mt8192-vcodec-dec
+       - mediatek,mt8186-vcodec-dec
+       - mediatek,mt8188-vcodec-dec
++      - mediatek,mt8189-vcodec-dec
+       - mediatek,mt8195-vcodec-dec
+ 
+   reg:
+diff --git a/Documentation/devicetree/bindings/remoteproc/mtk,scp.yaml b/Documentation/devicetree/bindings/remoteproc/mtk,scp.yaml
+index 2f0a28c7a..4d2f15ab8 100644
+--- a/Documentation/devicetree/bindings/remoteproc/mtk,scp.yaml
++++ b/Documentation/devicetree/bindings/remoteproc/mtk,scp.yaml
+@@ -20,6 +20,7 @@ properties:
+       - mediatek,mt8186-scp
+       - mediatek,mt8188-scp
+       - mediatek,mt8188-scp-dual
++      - mediatek,mt8189-scp
+       - mediatek,mt8192-scp
+       - mediatek,mt8195-scp
+       - mediatek,mt8195-scp-dual
+@@ -168,6 +169,7 @@ allOf:
+             - mediatek,mt8183-scp
+             - mediatek,mt8186-scp
+             - mediatek,mt8188-scp
++            - mediatek,mt8189-scp
+     then:
+       properties:
+         reg:
+diff --git a/drivers/clk/mediatek/Kconfig b/drivers/clk/mediatek/Kconfig
+index 4e703d58f..9dde9f589 100644
+--- a/drivers/clk/mediatek/Kconfig
++++ b/drivers/clk/mediatek/Kconfig
+@@ -917,6 +917,14 @@ config COMMON_CLK_MT8189_UFS
+ 	  option if the system includes a UFS device that relies on the MT8189
+ 	  SoC for clock management.
+ 
++config COMMON_CLK_MT8189_VCODEC
++	tristate "Clock driver for MediaTek MT8189 vcodec (vdec/venc)"
++	depends on COMMON_CLK_MT8189
++	help
++	  Clock driver for the MT8189 video decoder (vdec core) and video
++	  encoder (venc gcon) gates, needed by the MT8189 vcodec and its
++	  SMI larbs.
++
+ config COMMON_CLK_MT8192
+ 	tristate "Clock driver for MediaTek MT8192"
+ 	depends on ARM64 || COMPILE_TEST
+diff --git a/drivers/clk/mediatek/Makefile b/drivers/clk/mediatek/Makefile
+index 42f6ffa48..bd3604f1d 100644
+--- a/drivers/clk/mediatek/Makefile
++++ b/drivers/clk/mediatek/Makefile
+@@ -134,6 +134,7 @@ obj-$(CONFIG_COMMON_CLK_MT8189_MFG) += clk-mt8189-mfg.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_MMSYS) += clk-mt8189-mmsys.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_SCP) += clk-mt8189-scp.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_UFS) += clk-mt8189-ufs.o
++obj-$(CONFIG_COMMON_CLK_MT8189_VCODEC) += clk-mt8189-vcodec.o
+ obj-$(CONFIG_COMMON_CLK_MT8192) += clk-mt8192-apmixedsys.o clk-mt8192.o
+ obj-$(CONFIG_COMMON_CLK_MT8192_AUDSYS) += clk-mt8192-aud.o
+ obj-$(CONFIG_COMMON_CLK_MT8192_CAMSYS) += clk-mt8192-cam.o
+diff --git a/drivers/clk/mediatek/clk-mt8189-vcodec.c b/drivers/clk/mediatek/clk-mt8189-vcodec.c
+new file mode 100644
+index 000000000..04b45c197
+--- /dev/null
++++ b/drivers/clk/mediatek/clk-mt8189-vcodec.c
+@@ -0,0 +1,96 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * MediaTek MT8189 video codec clocks: the vdec core gates (VDEC_CORE0/1 in
++ * the vdec subsystem) and the venc gcon gates (VEN1). The gate layout matches
++ * ChromeOS's clk-mt8189-vcodec.c (Copyright (c) 2024 MediaTek Inc.).
++ */
++
++#include <dt-bindings/clock/mediatek,mt8189-clk.h>
++#include <linux/clk-provider.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++
++#include "clk-gate.h"
++#include "clk-mtk.h"
++
++static const struct mtk_gate_regs vdec_core0_cg_regs = {
++	.set_ofs = 0x0,
++	.clr_ofs = 0x4,
++	.sta_ofs = 0x0,
++};
++
++static const struct mtk_gate_regs vdec_core1_cg_regs = {
++	.set_ofs = 0x8,
++	.clr_ofs = 0xc,
++	.sta_ofs = 0x8,
++};
++
++#define GATE_VDEC_CORE0(_id, _name, _parent, _shift)			\
++	GATE_MTK_FLAGS(_id, _name, _parent, &vdec_core0_cg_regs, _shift,	\
++		       &mtk_clk_gate_ops_setclr_inv, CLK_OPS_PARENT_ENABLE)
++
++#define GATE_VDEC_CORE1(_id, _name, _parent, _shift)			\
++	GATE_MTK_FLAGS(_id, _name, _parent, &vdec_core1_cg_regs, _shift,	\
++		       &mtk_clk_gate_ops_setclr_inv, CLK_OPS_PARENT_ENABLE)
++
++static const struct mtk_gate vdec_core_clks[] = {
++	/* VDEC_CORE0 */
++	GATE_VDEC_CORE0(CLK_VDEC_CORE_VDEC_CKEN, "vdec_core_vdec_cken", "vdec_sel", 0),
++	GATE_VDEC_CORE0(CLK_VDEC_CORE_VDEC_ACTIVE, "vdec_core_vdec_active", "vdec_sel", 4),
++	/* VDEC_CORE1 */
++	GATE_VDEC_CORE1(CLK_VDEC_CORE_LARB_CKEN, "vdec_core_larb_cken", "vdec_sel", 0),
++};
++
++static const struct mtk_clk_desc vdec_core_desc = {
++	.clks = vdec_core_clks,
++	.num_clks = ARRAY_SIZE(vdec_core_clks),
++	/* registers live in the VDE0 power domain: power it for every access */
++	.need_runtime_pm = true,
++};
++
++static const struct mtk_gate_regs ven1_cg_regs = {
++	.set_ofs = 0x4,
++	.clr_ofs = 0x8,
++	.sta_ofs = 0x0,
++};
++
++#define GATE_VEN1(_id, _name, _parent, _shift)				\
++	GATE_MTK_FLAGS(_id, _name, _parent, &ven1_cg_regs, _shift,		\
++		       &mtk_clk_gate_ops_setclr_inv, CLK_OPS_PARENT_ENABLE)
++
++static const struct mtk_gate ven1_clks[] = {
++	GATE_VEN1(CLK_VEN1_CKE0_LARB, "ven1_larb", "venc_sel", 0),
++	GATE_VEN1(CLK_VEN1_CKE1_VENC, "ven1_venc", "venc_sel", 4),
++	GATE_VEN1(CLK_VEN1_CKE2_JPGENC, "ven1_jpgenc", "venc_sel", 8),
++	GATE_VEN1(CLK_VEN1_CKE3_JPGDEC, "ven1_jpgdec", "venc_sel", 12),
++	GATE_VEN1(CLK_VEN1_CKE4_JPGDEC_C1, "ven1_jpgdec_c1", "venc_sel", 16),
++	GATE_VEN1(CLK_VEN1_CKE5_GALS, "ven1_gals", "venc_sel", 28),
++	GATE_VEN1(CLK_VEN1_CKE6_GALS_SRAM, "ven1_gals_sram", "venc_sel", 31),
++};
++
++static const struct mtk_clk_desc ven1_desc = {
++	.clks = ven1_clks,
++	.num_clks = ARRAY_SIZE(ven1_clks),
++	/* registers live in the VEN0 power domain: power it for every access */
++	.need_runtime_pm = true,
++};
++
++static const struct of_device_id of_match_clk_mt8189_vcodec[] = {
++	{ .compatible = "mediatek,mt8189-vdec-core", .data = &vdec_core_desc },
++	{ .compatible = "mediatek,mt8189-venc", .data = &ven1_desc },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, of_match_clk_mt8189_vcodec);
++
++static struct platform_driver clk_mt8189_vcodec_drv = {
++	.probe = mtk_clk_simple_probe,
++	.remove = mtk_clk_simple_remove,
++	.driver = {
++		.name = "clk-mt8189-vcodec",
++		.of_match_table = of_match_clk_mt8189_vcodec,
++	},
++};
++module_platform_driver(clk_mt8189_vcodec_drv);
++
++MODULE_DESCRIPTION("MediaTek MT8189 vcodec (vdec/venc) clocks driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
+index 426d060d9..de547594e 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
+@@ -264,6 +264,15 @@ static int fops_vcodec_open(struct file *file)
+ 			mtk_vcodec_fw_get_vdec_capa(dev->fw_handler);
+ 
+ 		mtk_v4l2_vdec_dbg(0, ctx, "decoder capability %x", dev->dec_capability);
++
++		/*
++		 * The HEVC and AV1 backends only implement the LAT + core flow:
++		 * don't advertise them on a pure single core decoder, even if
++		 * the firmware does.
++		 */
++		if (dev->vdec_pdata->hw_arch == MTK_VDEC_PURE_SINGLE_CORE)
++			dev->dec_capability &= ~(MTK_VDEC_FORMAT_HEVC_FRAME |
++						 MTK_VDEC_FORMAT_AV1_FRAME);
+ 	}
+ 
+ 	ctx->dev->vdec_pdata->init_vdec_params(ctx);
+@@ -347,6 +356,8 @@ static void mtk_vcodec_dec_get_chip_name(struct mtk_vcodec_dec_dev *vdec_dev)
+ 		vdec_dev->chip_name = MTK_VDEC_MT8186;
+ 	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8188-vcodec-dec"))
+ 		vdec_dev->chip_name = MTK_VDEC_MT8188;
++	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8189-vcodec-dec"))
++		vdec_dev->chip_name = MTK_VDEC_MT8189;
+ 	else
+ 		vdec_dev->chip_name = MTK_VDEC_INVAL;
+ }
+@@ -560,6 +571,10 @@ static const struct of_device_id mtk_vcodec_match[] = {
+ 		.compatible = "mediatek,mt8188-vcodec-dec",
+ 		.data = &mtk_lat_sig_core_pdata,
+ 	},
++	{
++		.compatible = "mediatek,mt8189-vcodec-dec",
++		.data = &mtk_vdec_single_core_pdata,
++	},
+ 	{},
+ };
+ 
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.h b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.h
+index c9d27534c..2dd6450e4 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.h
++++ b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.h
+@@ -27,6 +27,7 @@ enum mtk_vcodec_dec_chip_name {
+ 	MTK_VDEC_MT8183 = 8183,
+ 	MTK_VDEC_MT8186 = 8186,
+ 	MTK_VDEC_MT8188 = 8188,
++	MTK_VDEC_MT8189 = 8189,
+ 	MTK_VDEC_MT8192 = 8192,
+ 	MTK_VDEC_MT8195 = 8195,
+ };
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_stateless.c b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_stateless.c
+index ab1894fba..3972e7219 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_stateless.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_stateless.c
+@@ -574,6 +574,7 @@ static void mtk_vcodec_dec_fill_h264_level(struct v4l2_ctrl_config *cfg,
+ 	switch (ctx->dev->chip_name) {
+ 	case MTK_VDEC_MT8192:
+ 	case MTK_VDEC_MT8188:
++	case MTK_VDEC_MT8189:
+ 		cfg->max = V4L2_MPEG_VIDEO_H264_LEVEL_5_2;
+ 		break;
+ 	case MTK_VDEC_MT8195:
+@@ -594,6 +595,7 @@ static void mtk_vcodec_dec_fill_h264_profile(struct v4l2_ctrl_config *cfg,
+ {
+ 	switch (ctx->dev->chip_name) {
+ 	case MTK_VDEC_MT8188:
++	case MTK_VDEC_MT8189:
+ 	case MTK_VDEC_MT8195:
+ 		cfg->max = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_10;
+ 		break;
+@@ -641,6 +643,7 @@ static void mtk_vcodec_dec_fill_vp9_level(struct v4l2_ctrl_config *cfg,
+ 	case MTK_VDEC_MT8188:
+ 		cfg->max = V4L2_MPEG_VIDEO_VP9_LEVEL_5_1;
+ 		break;
++	case MTK_VDEC_MT8189:
+ 	case MTK_VDEC_MT8195:
+ 		cfg->max = V4L2_MPEG_VIDEO_VP9_LEVEL_5_2;
+ 		break;
+@@ -658,6 +661,7 @@ static void mtk_vcodec_dec_fill_vp9_profile(struct v4l2_ctrl_config *cfg,
+ {
+ 	switch (ctx->dev->chip_name) {
+ 	case MTK_VDEC_MT8188:
++	case MTK_VDEC_MT8189:
+ 	case MTK_VDEC_MT8195:
+ 		cfg->max = V4L2_MPEG_VIDEO_VP9_PROFILE_2;
+ 		break;
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
+index 10359ce9b..65dfebf80 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
+@@ -1010,10 +1010,11 @@ static int vdec_h264_slice_single_decode_ext(void *h_vdec, struct mtk_vcodec_mem
+ 	struct vdec_vpu_inst *vpu = &inst->vpu;
+ 	struct mtk_video_dec_buf *src_buf_info, *dst_buf_info;
+ 	struct vdec_fb *fb;
++	unsigned char *buf;
+ 	unsigned int data[2], i;
+ 	u64 y_fb_dma, c_fb_dma;
+ 	struct mtk_vcodec_mem *mem;
+-	int err;
++	int err, nal_start_idx;
+ 
+ 	/* bs NULL means flush decoder */
+ 	if (!bs)
+@@ -1049,6 +1050,14 @@ static int vdec_h264_slice_single_decode_ext(void *h_vdec, struct mtk_vcodec_mem
+ 	memcpy(&inst->vsi_ctx_ext.h264_slice_params, &inst->h264_slice_param,
+ 	       sizeof(inst->vsi_ctx_ext.h264_slice_params));
+ 
++	buf = (unsigned char *)bs->va;
++	nal_start_idx = mtk_vdec_h264_find_start_code(buf, bs->size);
++	if (nal_start_idx < 0) {
++		err = -EINVAL;
++		goto err_free_fb_out;
++	}
++	inst->vsi_ctx_ext.dec.nal_info = buf[nal_start_idx];
++
+ 	*res_chg = inst->resolution_changed;
+ 	if (inst->resolution_changed) {
+ 		mtk_vdec_debug(inst->ctx, "- resolution changed -");
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_vp9_req_lat_if.c b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_vp9_req_lat_if.c
+index ba7a1cd99..aa0e02ab2 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_vp9_req_lat_if.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_vp9_req_lat_if.c
+@@ -23,6 +23,7 @@
+ 
+ #define VP9_TILE_BUF_SIZE 4096
+ #define VP9_PROB_BUF_SIZE 2560
++#define VP9_PROB_BUF_4K_SIZE 3840
+ #define VP9_COUNTS_BUF_SIZE 16384
+ 
+ #define HDR_FLAG(x) (!!((hdr)->flags & V4L2_VP9_FRAME_FLAG_##x))
+@@ -587,7 +588,7 @@ static int vdec_vp9_slice_alloc_working_buffer(struct vdec_vp9_slice_instance *i
+ 	 * use released buffers
+ 	 */
+ 
+-	size = (max_sb_w * max_sb_h + 2) * 576;
++	size = (max_sb_w * max_sb_h + 4) * 576;
+ 	for (i = 0; i < 2; i++) {
+ 		if (instance->mv[i].va)
+ 			mtk_vcodec_mem_free(ctx, &instance->mv[i]);
+@@ -612,7 +613,10 @@ static int vdec_vp9_slice_alloc_working_buffer(struct vdec_vp9_slice_instance *i
+ 	}
+ 
+ 	if (!instance->prob.va) {
+-		instance->prob.size = VP9_PROB_BUF_SIZE;
++		if (ctx->dev->chip_name == MTK_VDEC_MT8189)
++			instance->prob.size = VP9_PROB_BUF_4K_SIZE;
++		else
++			instance->prob.size = VP9_PROB_BUF_SIZE;
+ 		if (mtk_vcodec_mem_alloc(ctx, &instance->prob))
+ 			goto err;
+ 	}
+@@ -1127,7 +1131,8 @@ static int vdec_vp9_slice_setup_tile_buffer(struct vdec_vp9_slice_instance *inst
+ 			tiles->size[i][j] = size;
+ 			if (tiles->mi_rows[i]) {
+ 				*tb++ = (size << 3) + ((offset << 3) & 0x7f);
+-				*tb++ = pa & ~0xf;
++				/* bits 35:32 of the address go in the low nibble */
++				*tb++ = (pa & ~0xf) | (upper_32_bits(pa) & 0xf);
+ 				*tb++ = (pa << 3) & 0x7f;
+ 				mi_row = (tiles->mi_rows[i] - 1) & 0x1ff;
+ 				mi_col = (tiles->mi_cols[j] - 1) & 0x3f;
+diff --git a/drivers/remoteproc/mtk_common.h b/drivers/remoteproc/mtk_common.h
+index fd5c539ab..3185e0c5a 100644
+--- a/drivers/remoteproc/mtk_common.h
++++ b/drivers/remoteproc/mtk_common.h
+@@ -35,6 +35,12 @@
+ #define MT8186_SCP_L1_SRAM_PD_P1	0x40B0
+ #define MT8186_SCP_L1_SRAM_PD_p2	0x40B4
+ 
++/* MT8189: SCP2APMCU_IPC_SET as MT8192, but the clear registers moved */
++#define MT8189_SCP2APMCU_IPC_CLR	0x30010
++#define MT8189_SCP2SPM_IPC_CLR		0x30018
++#define MT8189_SCP_SECURE_DOMAIN	0xA080
++#define MT8189_SCP_DOMAIN_VAL		0x3303003
++
+ #define MT8192_L2TCM_SRAM_PD_0		0x10C0
+ #define MT8192_L2TCM_SRAM_PD_1		0x10C4
+ #define MT8192_L2TCM_SRAM_PD_2		0x10C8
+diff --git a/drivers/remoteproc/mtk_scp.c b/drivers/remoteproc/mtk_scp.c
+index 9751acc2b..f88396bb3 100644
+--- a/drivers/remoteproc/mtk_scp.c
++++ b/drivers/remoteproc/mtk_scp.c
+@@ -250,6 +250,27 @@ static void mt8192_scp_irq_handler(struct mtk_scp *scp)
+ 	}
+ }
+ 
++static void mt8189_scp_irq_handler(struct mtk_scp *scp)
++{
++	u32 scp_to_host;
++
++	scp_to_host = readl(scp->cluster->reg_base + MT8192_SCP2APMCU_IPC_SET);
++
++	if (scp_to_host & MT8192_SCP_IPC_INT_BIT) {
++		scp_ipi_handler(scp);
++
++		/*
++		 * SCP won't send another interrupt until we clear
++		 * MT8189_SCP2APMCU_IPC.
++		 */
++		writel(MT8192_SCP_IPC_INT_BIT,
++		       scp->cluster->reg_base + MT8189_SCP2APMCU_IPC_CLR);
++	} else {
++		scp_wdt_handler(scp, scp_to_host);
++		writel(1, scp->cluster->reg_base + MT8192_CORE0_WDT_IRQ);
++	}
++}
++
+ static void mt8195_scp_irq_handler(struct mtk_scp *scp)
+ {
+ 	u32 scp_to_host;
+@@ -411,6 +432,24 @@ static int mt8195_scp_clk_get(struct mtk_scp *scp)
+ 	return 0;
+ }
+ 
++static int mt8189_scp_clk_get(struct mtk_scp *scp)
++{
++	struct clk *clk;
++
++	/*
++	 * The SCP core runs from vlp_scp_sel: keep it enabled for as long as
++	 * the driver is bound, so that neither clk_disable_unused() nor the
++	 * clk_disable() calls of this driver stop a running SCP.
++	 */
++	clk = devm_clk_get_optional_enabled(scp->dev, "main");
++	if (IS_ERR(clk))
++		return dev_err_probe(scp->dev, PTR_ERR(clk), "Failed to get clock\n");
++
++	scp->clk = NULL;
++
++	return 0;
++}
++
+ static int mt8183_scp_before_load(struct mtk_scp *scp)
+ {
+ 	/* Clear SCP to host interrupt */
+@@ -585,6 +624,29 @@ static int mt8192_scp_before_load(struct mtk_scp *scp)
+ 	return 0;
+ }
+ 
++static int mt8189_scp_before_load(struct mtk_scp *scp)
++{
++	/* clear SPM interrupt, SCP2SPM_IPC_CLR */
++	writel(0xff, scp->cluster->reg_base + MT8189_SCP2SPM_IPC_CLR);
++
++	writel(1, scp->cluster->reg_base + MT8192_CORE0_SW_RSTN_SET);
++
++	/* enable SRAM clock */
++	scp_sram_power_on(scp->cluster->reg_base + MT8192_L2TCM_SRAM_PD_0, 0);
++	scp_sram_power_on(scp->cluster->reg_base + MT8192_L2TCM_SRAM_PD_1, 0);
++	scp_sram_power_on(scp->cluster->reg_base + MT8192_L2TCM_SRAM_PD_2, 0);
++	scp_sram_power_on(scp->cluster->reg_base + MT8192_L1TCM_SRAM_PDN, 0);
++	scp_sram_power_on(scp->cluster->reg_base + MT8192_CPU0_SRAM_PD, 0);
++
++	/* enable MPU for all memory regions */
++	writel(0xff, scp->cluster->reg_base + MT8192_CORE0_MEM_ATT_PREDEF);
++
++	/* set the bus domain of the SCP masters */
++	writel(MT8189_SCP_DOMAIN_VAL, scp->cluster->reg_base + MT8189_SCP_SECURE_DOMAIN);
++
++	return 0;
++}
++
+ static int mt8195_scp_l2tcm_on(struct mtk_scp *scp)
+ {
+ 	struct mtk_scp_of_cluster *scp_cluster = scp->cluster;
+@@ -1534,6 +1596,19 @@ static const struct mtk_scp_of_data mt8188_of_data_c1 = {
+ 	.scp_sizes = &mt8188_scp_c1_sizes,
+ };
+ 
++static const struct mtk_scp_of_data mt8189_of_data = {
++	.scp_clk_get = mt8189_scp_clk_get,
++	.scp_before_load = mt8189_scp_before_load,
++	.scp_irq_handler = mt8189_scp_irq_handler,
++	.scp_reset_assert = mt8192_scp_reset_assert,
++	.scp_reset_deassert = mt8192_scp_reset_deassert,
++	.scp_stop = mt8192_scp_stop,
++	.scp_da_to_va = mt8192_scp_da_to_va,
++	.host_to_scp_reg = MT8192_GIPC_IN_SET,
++	.host_to_scp_int_bit = MT8192_HOST_IPC_INT_BIT,
++	.scp_sizes = &default_scp_sizes,
++};
++
+ static const struct mtk_scp_of_data mt8192_of_data = {
+ 	.scp_clk_get = mt8192_scp_clk_get,
+ 	.scp_before_load = mt8192_scp_before_load,
+@@ -1590,6 +1665,7 @@ static const struct of_device_id mtk_scp_of_match[] = {
+ 	{ .compatible = "mediatek,mt8186-scp", .data = &mt8186_of_data },
+ 	{ .compatible = "mediatek,mt8188-scp", .data = &mt8188_of_data },
+ 	{ .compatible = "mediatek,mt8188-scp-dual", .data = &mt8188_of_data_cores },
++	{ .compatible = "mediatek,mt8189-scp", .data = &mt8189_of_data },
+ 	{ .compatible = "mediatek,mt8192-scp", .data = &mt8192_of_data },
+ 	{ .compatible = "mediatek,mt8195-scp", .data = &mt8195_of_data },
+ 	{ .compatible = "mediatek,mt8195-scp-dual", .data = &mt8195_of_data_cores },
+diff --git a/include/dt-bindings/clock/mediatek,mt8189-clk.h b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+index 7836a68f3..727defff2 100644
+--- a/include/dt-bindings/clock/mediatek,mt8189-clk.h
++++ b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+@@ -482,4 +482,20 @@
+ #define CLK_MMINFRA_GCE_26M				3
+ #define CLK_MMINFRA_CONFIG_NR_CLK			4
+ 
++/* VDEC_CORE */
++#define CLK_VDEC_CORE_LARB_CKEN				0
++#define CLK_VDEC_CORE_VDEC_CKEN				1
++#define CLK_VDEC_CORE_VDEC_ACTIVE			2
++#define CLK_VDEC_CORE_NR_CLK				3
++
++/* VEN1 */
++#define CLK_VEN1_CKE0_LARB				0
++#define CLK_VEN1_CKE1_VENC				1
++#define CLK_VEN1_CKE2_JPGENC				2
++#define CLK_VEN1_CKE3_JPGDEC				3
++#define CLK_VEN1_CKE4_JPGDEC_C1				4
++#define CLK_VEN1_CKE5_GALS				5
++#define CLK_VEN1_CKE6_GALS_SRAM				6
++#define CLK_VEN1_NR_CLK					7
++
+ #endif /* _DT_BINDINGS_CLK_MT8189_H */

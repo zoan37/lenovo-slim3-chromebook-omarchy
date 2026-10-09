@@ -1,0 +1,29 @@
+diff --git a/sound/soc/mediatek/mt8189/mt8189-nau8825.c b/sound/soc/mediatek/mt8189/mt8189-nau8825.c
+index 5d652d0cf..d98537fd2 100644
+--- a/sound/soc/mediatek/mt8189/mt8189-nau8825.c
++++ b/sound/soc/mediatek/mt8189/mt8189-nau8825.c
+@@ -233,7 +233,13 @@ static int mt8189_rtxxxx_i2s_hw_params(struct snd_pcm_substream *substream,
+ 	int bitwidth;
+ 	int ret;
+ 
+-	bitwidth = snd_pcm_format_width(params_format(params));
++	/*
++	 * The AFE I2S uses the physical sample width as its slot width (16 bits
++	 * for S16_LE, 32 bits for S24_LE and S32_LE), so BCLK is
++	 * 2 * physical width * rate. Match the codec slot width and PLL input to
++	 * it; a fixed 32 * rate PLL input only holds for S16_LE.
++	 */
++	bitwidth = snd_pcm_format_physical_width(params_format(params));
+ 	if (bitwidth < 0) {
+ 		dev_err(card->dev, "invalid bit width: %d\n", bitwidth);
+ 		return bitwidth;
+@@ -245,7 +251,8 @@ static int mt8189_rtxxxx_i2s_hw_params(struct snd_pcm_substream *substream,
+ 		return ret;
+ 	}
+ 
+-	ret = snd_soc_dai_set_pll(codec_dai, 0, 1, rate * 32, rate * 512);
++	ret = snd_soc_dai_set_pll(codec_dai, 0, 1, rate * 2 * bitwidth,
++				  rate * 512);
+ 	if (ret) {
+ 		dev_err(card->dev, "failed to set pll\n");
+ 		return ret;
