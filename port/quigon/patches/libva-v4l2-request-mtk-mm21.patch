@@ -316,7 +316,7 @@ index 777750b..e2b024b 100644
  	}
  
 diff --git i/src/driver.c w/src/driver.c
-index 1f93497..fb11b98 100644
+index 1f93497..7a1b714 100644
 --- i/src/driver.c
 +++ w/src/driver.c
 @@ -142,6 +142,13 @@ static const struct v4l2r_format_info format_infos[] = {
@@ -333,6 +333,47 @@ index 1f93497..fb11b98 100644
  #if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
  	{ V4L2_PIX_FMT_NV15, DRM_FORMAT_NV15, DRM_FORMAT_MOD_LINEAR,
  	  0, VA_RT_FORMAT_YUV420_10, 10, false },
+@@ -357,6 +364,28 @@ static bool video_device_is_request_decoder(const char *path,
+ 		fmtdesc.index++;
+ 	}
+ 
++	/* Which pixel formats can it output? */
++	decoder->mm21_only = false;
++#if defined(V4L2_PIX_FMT_MM21)
++	{
++		enum v4l2_buf_type capture_type =
++			output_type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE ?
++			V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE :
++			V4L2_BUF_TYPE_VIDEO_CAPTURE;
++		struct v4l2_fmtdesc capdesc = { .type = capture_type };
++		bool mm21 = false, other = false;
++
++		while (ioctl(fd, VIDIOC_ENUM_FMT, &capdesc) >= 0) {
++			if (capdesc.pixelformat == V4L2_PIX_FMT_MM21)
++				mm21 = true;
++			else
++				other = true;
++			capdesc.index++;
++		}
++		decoder->mm21_only = mm21 && !other;
++	}
++#endif
++
+ 	decoder->hevc_10bit = false;
+ 	for (unsigned int i = 0; i < decoder->nb_pixelformats; i++) {
+ 		if (decoder->pixelformats[i] == V4L2_PIX_FMT_HEVC_SLICE) {
+@@ -622,6 +651,11 @@ static bool driver_supports_profile(struct v4l2r_driver *drv, VAProfile profile)
+ 	if (profile == VAProfileHEVCMain10 && !driver_supports_hevc_10bit(drv))
+ 		return false;
+ 
++	if (drv->nb_decoders && drv->decoders[0].mm21_only &&
++	    (profile == VAProfileVP9Profile2 ||
++	     profile == VAProfileHEVCMain || profile == VAProfileHEVCMain10))
++		return false;
++
+ 	return true;
+ }
+ 
 diff --git i/src/surface.c w/src/surface.c
 index da433b2..38c57df 100644
 --- i/src/surface.c
@@ -453,10 +494,22 @@ index da433b2..38c57df 100644
  	 * size; replace it. */
  	if (surface->backing &&
 diff --git i/src/v4l2_request.h w/src/v4l2_request.h
-index 80ca83e..c396a4b 100644
+index 80ca83e..2ba28bc 100644
 --- i/src/v4l2_request.h
 +++ w/src/v4l2_request.h
-@@ -335,6 +335,7 @@ struct v4l2r_convert {
+@@ -98,6 +98,11 @@ struct v4l2r_decoder {
+ 	 * device can do 10-bit (e.g. Allwinner A64 lacks it), and the kernel only
+ 	 * rejects it at decode time, so probe it up front and gate Main10. */
+ 	bool hevc_10bit;
++	/* CAPTURE side is MediaTek MM21 only (mtk-vcodec-dec): 8-bit output,
++	 * so no 10-bit profiles, and its HEVC path does not work yet (OUTPUT
++	 * CREATE_BUFS fails), so no HEVC either: advertising a codec that then
++	 * fails makes sites pick it instead of one that plays. */
++	bool mm21_only;
+ };
+ 
+ /*
+@@ -335,6 +340,7 @@ struct v4l2r_convert {
  		struct v4l2r_surface *surface;	/* destination surface */
  	} jobs[V4L2R_CONVERT_SLOTS];
  	bool failed;			/* chain broke (layout/queue error), disabled */
