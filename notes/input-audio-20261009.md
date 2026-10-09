@@ -78,3 +78,11 @@ and GPU devfreq. SoC ~40–42 °C at light load.
 - Software cost is small anyway: ffmpeg 1080p30 10 s clip, 8 threads — VP9 3.6 CPU-s (≈0.36 core), H.264 4.2 CPU-s.
   Packages left installed (`libva-v4l2_request-avd`, `libva-utils`, `v4l-utils`) are harmless; nothing sets them up.
 - Possible later: GStreamer's `v4l2codecs` (gst-plugins-bad) handles MM21, for GStreamer-based players only.
+
+## Quick hardware checks (2026-10-09)
+
+- Webcam (`/dev/video0`, USB UVC `5986:2189`): MJPEG up to 1280×720; ffmpeg captured 30 frames (nothing saved).
+- Bluetooth (`hci0`, btmtk/btusb on the MT7921): powers on, a 10 s scan saw 6 nearby devices.
+- Touchscreen (`tc3408 1DA0:3018`, i2c-hid): works out of the box in Hyprland (user confirmed taps/scrolling).
+- External display: connectors `DP-1` (USB-C) and `HDMI-A-1` present, untested (nothing attached). HDMI/DP audio still
+  left out of the UCM profile.
