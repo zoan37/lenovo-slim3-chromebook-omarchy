@@ -1,0 +1,30 @@
+#!/bin/bash
+# quigon-gpu status|on|off — GPU desktop mode (Hyprland on libmali, apps on Zink, Chrome/Ghostty/Electron wrappers).
+# The mode is the presence of /etc/quigon/gpu.env; the boot-loop guard renames it to gpu.env.disabled-unstable.
+ENV=/etc/quigon/gpu.env
+S=/var/lib/quigon
+mode() {
+  if [[ -f $ENV ]]; then echo gpu
+  elif [[ -f $ENV.disabled-unstable ]]; then echo "software (turned off by the boot guard after two failed GPU boots)"
+  else echo software; fi
+}
+case "${1:-status}" in
+  status)
+    echo "mode: $(mode)"
+    echo "unconfirmed-boot strikes: $(cat $S/gpu-strikes 2>/dev/null || echo 0)"
+    for p in $(pgrep -x Hyprland); do grep -q libmali /proc/$p/maps 2>/dev/null && echo "running now: Hyprland on the Mali" || echo "running now: Hyprland on llvmpipe"; done
+    ;;
+  on)
+    src=""
+    for f in $ENV.disabled-unstable $ENV.off; do [[ -f $f ]] && { src=$f; break; }; done
+    [[ -f $ENV ]] && { echo "GPU mode is already on."; exit 0; }
+    [[ -n $src ]] || src=$ENV.example
+    sudo sh -c "cp '$src' '$ENV' && rm -f '$ENV.disabled-unstable' '$ENV.off' && mkdir -p $S && echo 0 > $S/gpu-strikes && rm -f $S/gpu-pending"
+    echo "GPU mode on. It takes effect after logging out or rebooting."
+    ;;
+  off)
+    [[ -f $ENV ]] || { echo "GPU mode is already off."; exit 0; }
+    sudo mv "$ENV" "$ENV.off" && echo "GPU mode off (software rendering). It takes effect after logging out or rebooting."
+    ;;
+  *) echo "usage: quigon-gpu status|on|off" >&2; exit 2 ;;
+esac

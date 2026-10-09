@@ -1,0 +1,6 @@
+[Unit]
+Description=Confirm the GPU desktop came up (clears the boot-loop guard)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/gpu-guard confirm

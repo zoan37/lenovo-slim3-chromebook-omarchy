@@ -1,0 +1,8 @@
+[Unit]
+Description=Confirm the GPU desktop 3 minutes after boot
+
+[Timer]
+OnBootSec=3min
+
+[Install]
+WantedBy=timers.target

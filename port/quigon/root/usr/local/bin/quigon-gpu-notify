@@ -1,0 +1,6 @@
+#!/bin/bash
+# Run at login (autostart.lua): tell the user when the boot guard turned the GPU desktop off.
+if [[ -f /etc/quigon/gpu.env.disabled-unstable || -n ${QUIGON_GPU_NOTIFY_TEST:-} ]]; then
+  notify-send -u critical -a "Quigon GPU" "GPU acceleration was turned off" \
+    "The last two boots didn't reach a working GPU desktop, so this session uses software rendering. Run 'quigon-gpu on' in a terminal to try the GPU again, or 'quigon-gpu status' for details."
+fi

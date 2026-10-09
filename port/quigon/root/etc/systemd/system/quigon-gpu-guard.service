@@ -1,0 +1,13 @@
+[Unit]
+Description=Fall back to software rendering after two unconfirmed GPU desktop boots
+Before=quigon-desktop@.service
+DefaultDependencies=no
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/gpu-guard boot
+
+[Install]
+WantedBy=multi-user.target

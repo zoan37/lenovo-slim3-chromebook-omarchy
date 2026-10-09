@@ -1,0 +1,37 @@
+#!/bin/bash
+# GPU boot-loop guard. `gpu-guard boot` (early in boot): if the previous boot never confirmed a healthy GPU desktop,
+# count a strike; on the second consecutive strike, rename /etc/quigon/gpu.env so the session comes up on llvmpipe.
+# `gpu-guard confirm` (timer, 3 min after boot): if Hyprland is running with libmali mapped, clear the strikes.
+set -u
+S=/var/lib/quigon; mkdir -p $S
+ENV=/etc/quigon/gpu.env
+log() { echo "quigon-gpu-guard: $*"; }
+case "${1:-}" in
+  boot)
+    [[ -f $ENV ]] || { rm -f $S/gpu-pending; exit 0; }
+    strikes=$(cat $S/gpu-strikes 2>/dev/null || echo 0)
+    if [[ -f $S/gpu-pending ]]; then
+      strikes=$((strikes + 1)); echo $strikes > $S/gpu-strikes
+      log "previous GPU boot was not confirmed (strike $strikes)"
+      if (( strikes >= 2 )); then
+        mv -f $ENV $ENV.disabled-unstable
+        rm -f $S/gpu-pending; echo 0 > $S/gpu-strikes
+        log "two unconfirmed GPU boots: disabled the GPU desktop (restore: mv $ENV.disabled-unstable $ENV)"
+        exit 0
+      fi
+    fi
+    touch $S/gpu-pending
+    ;;
+  confirm)
+    [[ -f $S/gpu-pending ]] || exit 0
+    for p in $(pgrep -x Hyprland); do
+      if grep -q libmali /proc/$p/maps 2>/dev/null; then
+        rm -f $S/gpu-pending; echo 0 > $S/gpu-strikes
+        log "GPU desktop confirmed (Hyprland pid $p on libmali)"
+        exit 0
+      fi
+    done
+    log "no Hyprland on libmali yet; leaving this boot unconfirmed"
+    ;;
+  *) echo "usage: $0 boot|confirm" >&2; exit 2 ;;
+esac
