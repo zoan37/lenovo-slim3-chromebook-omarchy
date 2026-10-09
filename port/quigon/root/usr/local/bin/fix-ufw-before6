@@ -1,0 +1,11 @@
+#!/bin/bash
+# fix-ufw-before6 — make ufw's IPv6 rules loadable on the ChromeOS kernel.
+# The kernel has no ip6t_rt or xt_hl, and iptables-restore is all-or-nothing: one unknown match makes the whole
+# file fail, and ufw then leaves the default DROP policy with no ACCEPT rules (= no network at all).
+# Drops the type-0 routing-header rules (rt) and the hop-limit-255 qualifiers (hl) on the NDP accept rules.
+# Idempotent; keeps the original as before6.rules.quigon-orig. Re-run after merging a before6.rules.pacnew.
+set -e
+f=/etc/ufw/before6.rules
+[[ -f $f ]] || exit 0
+cp -n "$f" "$f.quigon-orig"
+sed -i '/-m rt --rt-type 0 -j DROP/d; s/ -m hl --hl-eq [0-9]\+//' "$f"

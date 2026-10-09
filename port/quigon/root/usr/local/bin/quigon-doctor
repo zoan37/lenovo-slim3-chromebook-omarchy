@@ -86,6 +86,14 @@ check_system() {
   local qs; qs=$(pacman -Q quickshell 2>/dev/null | awk '{print $2}')
   if grep -q '^IgnorePkg.*quickshell' /etc/pacman.conf && [[ $qs == 0.3.1* ]]; then pass "quickshell $qs pinned (0.3.2 breaks re-locking)"
   else fail "quickshell is $qs / not pinned: 0.3.2 never releases the session lock, so later locks (and lock-before-sleep) fail"; fi
+  # ufw on iptables-legacy (no nftables in this kernel); before6.rules must not use ip6t_rt/xt_hl, logging must stay off (no xt_LOG).
+  if grep -qE -- '-m (rt|hl) ' /etc/ufw/before6.rules 2>/dev/null; then
+    if (( FIX )); then /usr/local/bin/fix-ufw-before6 && repaired "re-applied ufw before6.rules patch (rt/hl matches)"
+    else fail "ufw before6.rules uses rt/hl matches this kernel lacks: enabling ufw would block all traffic (sudo fix-ufw-before6)"; fi
+  else pass "ufw before6.rules loadable on this kernel"; fi
+  grep -q '^LOGLEVEL=off' /etc/ufw/ufw.conf 2>/dev/null && pass "ufw logging off (no xt_LOG in this kernel)" || fail "ufw logging is on: the LOG target is missing here (sudo ufw logging off)"
+  iptables -V 2>/dev/null | grep -q legacy && pass "iptables is the legacy backend" || fail "iptables is not iptables-legacy (this kernel has no nftables)"
+  iptables -S ufw-user-input >/dev/null 2>&1 && pass "firewall (ufw) active" || fail "firewall (ufw) not active (sudo ufw enable — test over SSH with an auto-revert)"
   if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
   elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
   else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi

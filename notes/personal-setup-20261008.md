@@ -26,14 +26,33 @@ Ported from omarchy-setup (`hyprland-shell-tweaks.md`, `new-machine-checklist.md
 - hyprpm elevates every write with `sudo`; non-interactively it was run with a temporary
   `/etc/sudoers.d/99-tmp-hyprpm` NOPASSWD rule, removed right after.
 
-## Firewall: not enabled (broken on this kernel, revisit)
+## Firewall: ufw on iptables-legacy (working since 2026-10-09)
 
 - The ChromeOS kernel has legacy iptables (`CONFIG_IP_NF_IPTABLES=y`) but **no nftables**, and Arch's default
   `iptables` is the nft variant (`Could not fetch rule set generation id: Invalid argument`). Switched to
   `iptables-legacy` (`pacman -S --ask=4 iptables-legacy`).
-- With Omarchy's ufw rules (deny in, LocalSend, LAN SSH, syncthing) enabled, **all traffic stopped**, including
-  replies to outgoing connections, so SSH and the bridge both died. Most likely the
-  `-m conntrack --ctstate RELATED,ESTABLISHED` rules don't work: `xt_conntrack`/`nf_conntrack` are modules
-  (`CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m`) and either aren't in the copied module tree or didn't load. Recovered with
-  `sudo ufw disable` at the keyboard; `ufw.service` disabled. Next time: check `modprobe xt_conntrack`, test the rules
-  with a timed auto-revert (`ufw enable; sleep 60; ufw disable` in a detached unit) before leaving it on.
+- First attempt (2026-10-08): enabling Omarchy's ufw rules (deny in, LocalSend, LAN SSH, syncthing) **cut all traffic**,
+  replies included. conntrack was fine (`nf_conntrack`/`xt_conntrack` load as modules). The real cause:
+  `iptables-restore` is all-or-nothing, and ufw's stock files use matches/targets this kernel doesn't have, so the rule
+  files failed to load while the default `DROP` policies were still set:
+  - missing modules: `xt_LOG`/`nf_log_syslog` (logging), `ip6t_rt` (`-m rt`), `xt_hl` (`-m hl`), `xt_recent`,
+    `xt_multiport`. Present: `xt_conntrack`, `xt_limit`, `xt_addrtype`, `xt_comment`, `xt_tcpudp`, `iptable_filter`,
+    `ip6table_filter`.
+  - `before6.rules` failed with `Extension rt revision 0 not supported`.
+- Fix:
+  - `ufw logging off` (no LOG target), which also drops the `-m limit` logging rules.
+  - `fix-ufw-before6` (port/quigon/root/usr/local/bin): deletes the 4 `-m rt --rt-type 0 -j DROP` rules and strips
+    `-m hl --hl-eq 255` from the NDP accept rules (they still accept the same ICMPv6 types, just without the hop-limit
+    check). It keeps `/etc/ufw/before6.rules.quigon-orig`. `before6.rules` is a pacman backup file, so updates leave it
+    alone and write a `.pacnew` instead. quigon-doctor (also run after each pacman transaction) re-applies the patch if
+    `rt`/`hl` come back.
+  - Tested with a detached `systemd-run` rollback (`sleep 90/120; ufw --force disable` unless a flag file in /run is
+    removed). The first try timed out and rolled back on its own, which shows the safety net works. Then
+    `systemctl restart ufw` (the boot path) → SSH, the bridge, and outgoing traffic all fine. A test HTTP server on 8765
+    was unreachable from the LAN while 22 was reachable.
+  - `ufw.service` enabled, `ENABLED=yes`.
+- Limits on this kernel: no firewall logging, no `ufw limit` (needs `xt_recent`), and no multi-port rules like
+  `allow 80,443/tcp` (needs `xt_multiport`). Use one rule per port, or ranges (`1000:2000/tcp` uses plain `--dport`). If
+  a new rule makes ufw fail to load, `sudo ufw disable` at the keyboard restores the network. A kernel rebuild with
+  NF_TABLES (+ those xt modules) would lift all of this.
+
