@@ -51,11 +51,20 @@
 					 <&mm_iommu M4U_L4_P9_HW_VDEC_AVC_MV_EXT>,
 					 <&mm_iommu M4U_L4_P10_HW_VDEC_RG_CTRL_DMA_EXT>,
 					 <&mm_iommu M4U_L4_P11_HW_VDEC_UFO_ENC_EXT>;
+				/*
+				 * The MMINFRA GCE gates: ChromeOS's mtk_mminfra driver keeps them on
+				 * whenever MM_INFRA is powered; mainline has no such driver (and no GCE
+				 * node), so the decoder holds them while it runs.
+				 */
 				clocks = <&topckgen CLK_TOP_VDEC_SEL>,
 					 <&vdec_core_clk CLK_VDEC_CORE_VDEC_CKEN>,
 					 <&vdec_core_clk CLK_VDEC_CORE_LARB_CKEN>,
-					 <&topckgen CLK_TOP_UNIVPLL_D4>;
-				clock-names = "vdec-sel", "vdec-soc-vdec", "vdec", "vdec-top";
+					 <&topckgen CLK_TOP_UNIVPLL_D4>,
+					 <&mminfra CLK_MMINFRA_GCE_D>,
+					 <&mminfra CLK_MMINFRA_GCE_M>,
+					 <&mminfra CLK_MMINFRA_GCE_26M>;
+				clock-names = "vdec-sel", "vdec-soc-vdec", "vdec", "vdec-top",
+					      "gce-d", "gce-m", "gce-26m";
 				assigned-clocks = <&topckgen CLK_TOP_VDEC_SEL>;
 				assigned-clock-parents = <&topckgen CLK_TOP_UNIVPLL_D4>;
 				power-domains = <&spm MT8189_POWER_DOMAIN_VDE0>;

@@ -3,9 +3,17 @@
 # Default: Qt Quick on Vulkan, straight on ChromeOS's libmali + the ARM WSI layer (QSG_RHI_BACKEND=vulkan). Zink
 # is not involved (it crashes Qt Quick here). Falls back to Qt Quick's software renderer when GPU mode is off,
 # when /etc/quigon/bar-software exists (manual opt-out), or when the bar has started 5+ times within 60 s in this
-# session (crash loop), with a notification. The counter lives in XDG_RUNTIME_DIR, so a new login retries Vulkan.
+# session (crash loop), with a notification. The counter lives in XDG_RUNTIME_DIR, so a new login retries the GPU.
+# On the mainline kernel (release *-quigon*): Qt Quick on OpenGL through Mesa/Panfrost (no libmali, no Vulkan driver
+# for the G57 there), with the same crash-loop fallback.
 sw() { echo "QT_QUICK_BACKEND=software"; exit 0; }
-[[ -f /etc/quigon/gpu.env && -e /etc/vulkan/icd.d/quigon_mali_icd.json && ! -e /etc/quigon/bar-software ]] || sw
+[[ -e /etc/quigon/bar-software ]] && sw
+if [[ $(uname -r) == *-quigon* ]]; then
+  rhi=opengl
+else
+  [[ -f /etc/quigon/gpu.env && -e /etc/vulkan/icd.d/quigon_mali_icd.json ]] || sw
+  rhi=vulkan
+fi
 state=${XDG_RUNTIME_DIR:-/tmp}/quigon-bar-starts
 now=$(date +%s)
 recent=$(awk -v n="$now" '$1 > n - 60' "$state" 2>/dev/null | wc -l)
@@ -13,10 +21,10 @@ echo "$now" >> "$state"
 if (( recent >= 4 )); then
   if [[ ! -e $state.fellback ]]; then
     touch "$state.fellback"
-    logger -t quigon-bar "bar restarted $((recent + 1)) times in 60 s on Vulkan: software rendering for this session"
-    notify-send -u critical "Omarchy bar: switched to software rendering" "It kept restarting on the GPU (Vulkan). Software rendering until next login; 'sudo touch /etc/quigon/bar-software' makes it permanent." 2>/dev/null &
+    logger -t quigon-bar "bar restarted $((recent + 1)) times in 60 s on $rhi: software rendering for this session"
+    notify-send -u critical "Omarchy bar: switched to software rendering" "It kept restarting on the GPU ($rhi). Software rendering until next login; 'sudo touch /etc/quigon/bar-software' makes it permanent." 2>/dev/null &
   fi
   sw
 fi
 [[ -e $state.fellback ]] && sw
-echo "-u QT_QUICK_BACKEND QSG_RHI_BACKEND=vulkan"
+echo "-u QT_QUICK_BACKEND QSG_RHI_BACKEND=$rhi"

@@ -66,7 +66,14 @@ check_system() {
   swapon --show=NAME --noheadings | grep -q zram && pass "zram swap active" || fail "zram swap not active"
 
   section "GPU"
-  if [[ -f /etc/quigon/gpu.env ]]; then pass "GPU mode on (/etc/quigon/gpu.env)"; else
+  if [[ $kver == *-quigon* ]]; then
+    # Mainline kernel: Mesa on Panfrost for everything; the libmali setup below is for the ChromeOS kernel.
+    [[ -e /sys/bus/platform/drivers/panfrost/13000000.gpu ]] && pass "mainline kernel: Panfrost drives the Mali-G57" || fail "mainline kernel but Panfrost isn't bound to the GPU"
+    if [[ -e /etc/quigon/gpu.env ]]; then
+      findmnt -n /etc/quigon/gpu.env >/dev/null && pass "gpu.env masked for this boot (quigon-mainline.service)" || fail "gpu.env not masked: the libmali wrappers would be used on mainline (systemctl start quigon-mainline)"
+    fi
+    [[ -e /opt/quigon-gpu/mesa-panfrost/lib/libgallium-26.2.4.so ]] && pass "private Panfrost Mesa for Ghostty (GL 4.3)" || fail "no /opt/quigon-gpu/mesa-panfrost: Ghostty renders on llvmpipe (scripts/build-mesa-panfrost.sh)"
+  elif [[ -f /etc/quigon/gpu.env ]]; then pass "GPU mode on (/etc/quigon/gpu.env)"; else
     [[ -f /etc/quigon/gpu.env.disabled-unstable ]] && fail "GPU mode turned off by the boot guard (quigon-gpu on)" || fail "GPU mode off"; fi
   local f
   for f in /opt/quigon-gpu/mali/lib/libmali.so.0.54.1.relr /opt/quigon-gpu/lib/egl-mali-shim.so /opt/quigon-gpu/chrome-lib/libEGL.so.1 \
@@ -124,12 +131,15 @@ check_session() {
   local u uid home; u=$(desk_user); uid=$(id -u "$u" 2>/dev/null) || return 0; home=$(getent passwd "$u" | cut -d: -f6)
   section "Desktop session ($u)"
   local p; p=$(pgrep -x Hyprland | head -1)
-  if [[ -n $p ]]; then
+  if [[ -n $p && $(uname -r) == *-quigon* ]]; then
+    tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -q '^LIBGL_ALWAYS_SOFTWARE=1' && fail "Hyprland is running on llvmpipe (LIBGL_ALWAYS_SOFTWARE set)" || pass "Hyprland is rendering through Mesa on Panfrost"
+  elif [[ -n $p ]]; then
     grep -q libmali /proc/$p/maps 2>/dev/null && pass "Hyprland is rendering on the Mali" || fail "Hyprland is running on llvmpipe"
   else fail "Hyprland is not running"; fi
   local qp; qp=$(pgrep -u "$u" -x quickshell | head -1)
   if [[ -z $qp ]]; then fail "Omarchy bar not running (omarchy-restart-shell)"
   elif grep -q libmali /proc/$qp/maps 2>/dev/null; then pass "Omarchy bar running on the GPU (Qt Quick on libmali Vulkan)"
+  elif tr '\0' '\n' < /proc/$qp/environ 2>/dev/null | grep -q '^QSG_RHI_BACKEND=opengl'; then pass "Omarchy bar running on the GPU (Qt Quick on OpenGL, Panfrost)"
   elif [[ -e /run/user/$uid/quigon-bar-starts.fellback ]]; then fail "Omarchy bar fell back to software after restarting repeatedly on Vulkan (journalctl -t omarchy-shell -t quigon-bar)"
   else pass "Omarchy bar running (software rendering$([[ -e /etc/quigon/bar-software ]] && echo ', /etc/quigon/bar-software set'))"; fi
   local d

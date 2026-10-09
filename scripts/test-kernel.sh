@@ -38,4 +38,7 @@ futility vbutil_kernel --verify $out >/dev/null
 dd if=$out of=/dev/sda4 bs=1M conv=fsync status=none
 cgpt add -i 4 -P 4 -T 1 -S 0 /dev/sda
 echo "armed: next boot runs the test kernel once ($(numfmt --to=iec $size)); the one after falls back to KERN-C"
+# The reboot into the test kernel is intentional: don't let quigon-gpu-guard count this (possibly short) boot as an
+# unconfirmed GPU boot, or a few quick test rounds switch the GPU desktop off.
+rm -f /var/lib/quigon/gpu-pending
 status

@@ -202,7 +202,8 @@
 				 <&{/soc/clock-controller@112b8000} MT8189_UFSAO_RST_UFS_MPHY>;
 			reset-names = "unipro_rst", "crypto_rst", "hci_rst", "mphy_rst";
 			mediatek,ufs-disable-mcq;
-			mediatek,ufs-rtff-mtcmos;
+			/* not mediatek,ufs-rtff-mtcmos: switching the UFS power island off in system suspend (as ChromeOS does)
+			 * left the host unusable after resume here (commands failing, then an SError) */
 			mediatek,ufs-broken-vcc;
 		};
 
