@@ -1,0 +1,52 @@
+diff --git a/drivers/watchdog/mtk_wdt.c b/drivers/watchdog/mtk_wdt.c
+index 1630ab65d..b040220c1 100644
+--- a/drivers/watchdog/mtk_wdt.c
++++ b/drivers/watchdog/mtk_wdt.c
+@@ -373,6 +373,15 @@ static int mtk_wdt_start(struct watchdog_device *wdt_dev)
+ 	return 0;
+ }
+ 
++/*
++ * quigon bring-up: arm the watchdog at probe even if the bootloader left it off, so a kernel that hangs later in
++ * boot (a driver probe, a deadlock) gets reset instead of sitting there until someone presses the power button.
++ * The watchdog core keeps it fed (CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED) while the kernel is alive.
++ */
++static unsigned int start_timeout;
++module_param(start_timeout, uint, 0444);
++MODULE_PARM_DESC(start_timeout, "Arm the watchdog at probe with this timeout in seconds (0 = leave it as found)");
++
+ static void mtk_wdt_init(struct watchdog_device *wdt_dev)
+ {
+ 	struct mtk_wdt_dev *mtk_wdt = watchdog_get_drvdata(wdt_dev);
+@@ -388,6 +397,11 @@ static void mtk_wdt_init(struct watchdog_device *wdt_dev)
+ 	if (readl(wdt_base + WDT_MODE) & WDT_MODE_EN) {
+ 		set_bit(WDOG_HW_RUNNING, &wdt_dev->status);
+ 		mtk_wdt_start(wdt_dev);
++	} else if (start_timeout) {
++		wdt_dev->timeout = min_t(unsigned int, start_timeout, WDT_MAX_TIMEOUT);
++		set_bit(WDOG_HW_RUNNING, &wdt_dev->status);
++		mtk_wdt_start(wdt_dev);
++		dev_info(wdt_dev->parent, "armed at boot, %u s\n", wdt_dev->timeout);
+ 	}
+ }
+ 
+@@ -619,7 +633,18 @@ static struct platform_driver mtk_wdt_driver = {
+ 	},
+ };
+ 
+-module_platform_driver(mtk_wdt_driver);
++/* Registered early (subsys) so it probes before most drivers that could hang the boot. */
++static int __init mtk_wdt_driver_init(void)
++{
++	return platform_driver_register(&mtk_wdt_driver);
++}
++subsys_initcall(mtk_wdt_driver_init);
++
++static void __exit mtk_wdt_driver_exit(void)
++{
++	platform_driver_unregister(&mtk_wdt_driver);
++}
++module_exit(mtk_wdt_driver_exit);
+ 
+ module_param(timeout, uint, 0);
+ MODULE_PARM_DESC(timeout, "Watchdog heartbeat in seconds");

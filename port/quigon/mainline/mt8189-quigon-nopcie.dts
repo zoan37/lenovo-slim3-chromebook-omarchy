@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/* Bring-up variant: mt8189-quigon without PCIe/Wi-Fi (to bisect probe hangs). */
+#include "mt8189-quigon.dts"
+
+&pcie {
+	status = "disabled";
+};
+
+&pciephy {
+	status = "disabled";
+};

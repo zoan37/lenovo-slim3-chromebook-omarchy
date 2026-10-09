@@ -12,6 +12,15 @@ mkdir -p /dev/pts /run /tmp; mount -t devpts devpts /dev/pts; mount -t tmpfs tmp
 k() { echo "QM: $*" > /dev/kmsg; }
 k "init reached: $(uname -r) $(cat /proc/cmdline)"
 if [ -e /dev/watchdog ]; then watchdog -T 30 -t 5 /dev/watchdog && k "watchdog armed (30 s)"; else k "no /dev/watchdog"; fi
+k "wdt: $(dmesg | grep -i -E 'mtk-wdt|watchdog' | tail -4 | tr '\n' ';' | cut -c1-600)"
+if grep -q quigon.wdtest /proc/cmdline; then
+  # Watchdog self-test: stop feeding it. A working reset reboots us within the timeout (31 s).
+  k "wdtest: killing the watchdog feeder at $(cut -d. -f1 /proc/uptime) s"
+  killall -9 watchdog
+  sleep 120
+  k "wdtest: STILL ALIVE 120 s later at $(cut -d. -f1 /proc/uptime) s -> the watchdog reset does NOT work"
+  sync; reboot -f
+fi
 k "cpus online $(cat /sys/devices/system/cpu/online), $(grep MemTotal /proc/meminfo)"
 k "model: $(tr -d '\0' < /proc/device-tree/model)"
 k "deferred: $(tr '\n' ';' < /sys/kernel/debug/devices_deferred 2>/dev/null | cut -c1-900)"
@@ -27,7 +36,7 @@ i=0; while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)
 if [ -d /sys/class/net/wlan0 ] && [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
   ip link set lo up
   wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf -f /tmp/wpa.log
-  if udhcpc -i wlan0 -t 15 -T 2 -n -q -s /usr/share/udhcpc/default.script > /tmp/dhcp.log 2>&1; then
+  if udhcpc -i wlan0 -r 192.168.0.22 -t 15 -T 2 -n -q -s /usr/share/udhcpc/default.script > /tmp/dhcp.log 2>&1; then
     k "network up: $(ip -4 -o addr show wlan0 | awk '{print $4}') via $(ip route | awk '/default/{print $3}')"
     mkdir -p /etc/dropbear && dropbear -R -E -s -p 22 2>/tmp/dropbear.log && k "ssh (dropbear) listening"
     stay=1200
