@@ -32,3 +32,13 @@ Experimental device port, not an installer.
 - `notes/` — dated bring-up logs.
 - `scripts/bridge/` — LAN command bridge for driving the Chromebook from another machine (see [AGENTS.md](AGENTS.md)).
 - `private/`, `artifacts/` — gitignored dumps (kernel partition, logs).
+
+## To do
+
+- **Swap on the internal drive** when Omarchy moves to the internal UFS (dual-boot or replacing ChromeOS): a swap file or
+  partition as low-priority overflow behind the 15.4G zram, which also makes hibernation possible. Not on the USB stick.
+- Move from the USB stick to the internal drive (dual-boot via the spare KERN-C/ROOT-C slots, or replace ChromeOS).
+- HDMI/DisplayPort audio (UCM devices left out until tested with a display attached).
+- Firewall (ufw cut all traffic on this kernel; check `xt_conntrack`, test with an auto-revert).
+- Syncthing folders; hardware video decode (MediaTek vcodec) for Chrome; re-sync script for ChromeOS kernel/modules/firmware/
+  libmali after ChromeOS updates; backup image of the USB stick.
