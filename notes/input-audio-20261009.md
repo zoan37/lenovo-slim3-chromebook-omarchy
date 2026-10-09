@@ -86,3 +86,18 @@ and GPU devfreq. SoC ~40–42 °C at light load.
 - Touchscreen (`tc3408 1DA0:3018`, i2c-hid): works out of the box in Hyprland (user confirmed taps/scrolling).
 - External display: connectors `DP-1` (USB-C) and `HDMI-A-1` present, untested (nothing attached). HDMI/DP audio still
   left out of the UCM profile.
+
+## Lid sleep test and Wi-Fi after resume
+
+Manual lid close: logind "Lid closed" → s2idle entry 13 s later → "Lid opened" ~30 s after, woke via `chromeos-ec` IRQ;
+suspend_stats 2/0. Two problems:
+
+- `omarchy-system-sleep-lock: suspending without a secure lock (the shell did not secure the session within 12000ms)`:
+  the bar didn't confirm its lock before the inhibitor budget (logind `InhibitDelayMaxSec=15`), so it slept unlocked
+  (the lock appeared on wake). Seen once with the bar on `QT_QUICK_BACKEND=software`; to investigate.
+- Wi-Fi: NetworkManager brought wlan0 back as `unavailable` and made no autoconnect attempt for 76 s (the RTC test
+  reconnected in ~12 s), and the 5 GHz network didn't show; the user connected to the 2.4 GHz SSID by hand. Afterwards the
+  5 GHz AP was visible again (regdom US, ch 153). Fixes: `home-wifi` (5 GHz) autoconnect-priority 10 over the 2.4 GHz
+  profile; [`quigon-wifi-resume`](../port/quigon/root/usr/lib/systemd/system-sleep/quigon-wifi-resume) system-sleep hook
+  rescans and reconnects if wlan0 isn't connected 15 s after resume (detached; `/usr/lib/systemd/system-sleep/` because
+  systemd 261 ignores `/etc`).

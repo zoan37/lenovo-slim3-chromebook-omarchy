@@ -1,0 +1,14 @@
+#!/bin/bash
+# After resume NetworkManager sometimes leaves wlan0 "unavailable" with no autoconnect attempt (seen once: 76 s until
+# a manual connect; another resume reconnected in ~12 s). If Wi-Fi isn't connected 15 s after waking, rescan and bring
+# up the best saved network. Detached with systemd-run so the resume itself isn't delayed. Must live in
+# /usr/lib/systemd/system-sleep/ (systemd 261 ignores /etc/systemd/system-sleep).
+[[ $1 == post ]] || exit 0
+systemd-run --no-block --quiet --unit="quigon-wifi-resume-$(date +%s)" --collect bash -c '
+  sleep 15
+  nmcli -t -f DEVICE,STATE device | grep -q "^wlan0:connected" && exit 0
+  logger -t quigon-wifi-resume "wlan0 not connected 15 s after resume; rescanning"
+  nmcli device set wlan0 managed yes 2>/dev/null
+  nmcli device wifi rescan 2>/dev/null; sleep 5
+  nmcli device connect wlan0 2>&1 | logger -t quigon-wifi-resume
+'
