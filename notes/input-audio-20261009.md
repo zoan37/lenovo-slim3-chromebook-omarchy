@@ -116,3 +116,11 @@ The XPS 13 (Omarchy rc, **Quickshell 0.3.1**) logs `secure=false`, `session-lock
 `extra/quickshell 0.3.1-1` and pinned (`IgnorePkg = quickshell` in pacman.conf and the guard's known-good copy;
 quigon-doctor checks it). User test: lock → unlock → lock → unlock now logs exactly the XPS sequence twice and ends at
 `locked:false`. Worth reporting upstream (Quickshell 0.3.2 / Omarchy edge).
+
+Upstream (checked 2026-10-09, not re-filed — already fully reported): Quickshell
+[#1230](https://github.com/quickshell-mirror/quickshell/issues/1230) (`WlSessionLock::unlock()` checks `isLocked()` after
+releasing, so `lockStateChanged` never fires; a comment bisects it to afb2c27 "wayland/lock: guard against reentrancy
+during surface creation" — the 0.3.1 tag still notifies on unlock), and Omarchy
+[#14588](https://github.com/omacom/omarchy/issues/14588) (same self-contradictory `lock status`; a comment gives the 0.3.2
+root cause, a tested patch, and "downgrade to the release before 0.3.2"). Related: Omarchy #10299. Remove the
+`IgnorePkg = quickshell` pin once a release with the fix lands.

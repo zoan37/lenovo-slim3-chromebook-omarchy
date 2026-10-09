@@ -41,6 +41,7 @@ Experimental device port, not an installer.
 - **Rebuild the ChromeOS kernel** (`chromeos-6.6`, obiwan/quigon config) with: `CONFIG_DISK_BASED_SWAP` (disk swap is
   refused without it; then add a swap file on ROOT-C behind zram), `CONFIG_MEMCG` (systemd-oomd), `CONFIG_NF_TABLES`
   (firewall), `CONFIG_VT`/fbcon (boot console), maybe `CONFIG_HIBERNATION`. Sign with the devkeys like today's kernel.
+- Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
 - HDMI/DisplayPort audio (UCM devices left out until tested with a display attached).
 - Firewall (ufw cut all traffic on this kernel; check `xt_conntrack`, test with an auto-revert).
