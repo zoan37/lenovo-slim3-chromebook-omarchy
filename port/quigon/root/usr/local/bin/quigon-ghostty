@@ -11,5 +11,6 @@ if [[ -f /etc/quigon/gpu.env && -e $M/lib/libgallium-26.2.4.so ]]; then
   export LD_PRELOAD=/opt/quigon-gpu/lib/ghostty-gpu-preload.so${LD_PRELOAD:+:$LD_PRELOAD}
   export MESA_LOADER_DRIVER_OVERRIDE=zink MESA_GL_VERSION_OVERRIDE=4.3 MESA_GLSL_VERSION_OVERRIDE=430
   export QUIGON_ZINK_RO_VERTEX_SSBO=1
+  export SDL_VIDEODRIVER=wayland,x11   # kept for programs started in the terminal (Zink under Xwayland crashes)
 fi
 exec /usr/bin/ghostty "$@"

@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/omarchy-launch-shell
+
+[Action]
+Description = Keeping the Omarchy bar on llvmpipe (quigon)...
+When = PostTransaction
+Exec = /usr/local/bin/fix-omarchy-launch-shell

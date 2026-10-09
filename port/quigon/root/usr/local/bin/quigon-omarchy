@@ -3,15 +3,23 @@
 # Started by quigon-desktop@<user>.service.
 #
 # GPU mode (/etc/quigon/gpu.env present): Hyprland renders on the Mali through ChromeOS's libmali (its unit gets
-# gpu.env via a drop-in); Chrome, Electron apps and Ghostty use the Mali through their quigon-* wrappers, GTK 4 apps
-# through the Mali Vulkan driver. Plain Mesa OpenGL apps stay on llvmpipe: Zink on the Mali can't export images
-# (VK_ERROR_INVALID_EXTERNAL_HANDLE), which crashed Quickshell when it was the default; opt in with quigon-zink.
+# gpu.env via a drop-in, which also keeps Hyprland's own children such as the Omarchy bar on llvmpipe). Apps launched
+# through uwsm get Mesa OpenGL on the Mali via Zink by default; Qt Quick uses its software renderer (Qt Quick on Zink
+# crashed Quickshell: Zink can't export images on this driver); Mesa GBM stays software so Chromium/Electron fall back
+# cleanly. Chrome, Electron apps and Ghostty have their own quigon-* wrappers; GTK 4 uses the Mali Vulkan driver.
+# quigon-nozink <app> runs an app on llvmpipe. Software mode: everything on llvmpipe.
 set -u
 cd "$HOME"
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export LIBSEAT_BACKEND=seatd SEATD_VTBOUND=0
 export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
-export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
+if [[ -f /etc/quigon/gpu.env ]]; then
+  # SDL games default to X11 (Xwayland) when DISPLAY is set, and Zink under Xwayland crashes (DRI3 needs image
+  # export); prefer Wayland, fall back to X11 for SDL builds without it.
+  export MESA_LOADER_DRIVER_OVERRIDE=zink GBM_ALWAYS_SOFTWARE=1 QT_QUICK_BACKEND=software SDL_VIDEODRIVER=wayland,x11
+else
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
+fi
 export XDG_SESSION_TYPE=wayland XDG_SEAT=${XDG_SEAT:-seat0}
 unset WAYLAND_DISPLAY DISPLAY
 [[ -f $HOME/.config/quigon/desktop.env ]] && source "$HOME/.config/quigon/desktop.env"

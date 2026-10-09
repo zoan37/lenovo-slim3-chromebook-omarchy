@@ -1,0 +1,9 @@
+#!/bin/bash
+# Keep the Omarchy bar (Quickshell) on llvmpipe while desktop apps default to Zink: the real Omarchy shell crashes on
+# Zink here (vkCreateImage VK_ERROR_INVALID_EXTERNAL_HANDLE, likely its DMA-BUF imports), a plain Quickshell window
+# doesn't. Idempotent; re-applied by zz-omarchy-launch-shell.hook after omarchy upgrades.
+f=/usr/bin/omarchy-launch-shell
+[[ -f $f ]] || exit 0
+grep -q 'quigon: bar on llvmpipe' "$f" && exit 0
+sed -i 's|systemd-cat -t omarchy-shell -- quickshell -n -p|systemd-cat -t omarchy-shell -- env -u MESA_LOADER_DRIVER_OVERRIDE LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe quickshell -n -p|' "$f"
+sed -i '0,/^run_shell() {/s//# quigon: bar on llvmpipe (see \/usr\/local\/bin\/fix-omarchy-launch-shell)\nrun_shell() {/' "$f"
