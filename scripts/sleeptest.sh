@@ -3,7 +3,7 @@
 N=${1:-30}
 B=/sys/class/power_supply/sbs-10-000b
 log() { echo "$(date +%T) $*"; }
-uid=$(id -u zoan); sig=$(ls -t /run/user/$uid/hypr | head -1)
+U=${DESKTOP_USER:-$(id -nu 1000)}; uid=$(id -u "$U"); sig=$(ls -t /run/user/$uid/hypr | head -1)
 E="env XDG_RUNTIME_DIR=/run/user/$uid HYPRLAND_INSTANCE_SIGNATURE=$sig DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus PATH=/usr/share/omarchy/bin:/usr/bin"
 e0=$(cat $B/energy_now); t0=$(date +%s.%N); s0=$(cat /sys/power/suspend_stats/success 2>/dev/null)
 log "before: energy=${e0}uWh battery=$(cat $B/capacity)% status=$(cat $B/status) suspend_success=$s0"
@@ -18,7 +18,7 @@ log "elapsed $(awk -v a=$t0 -v b=$t1 'BEGIN{printf "%.1f", b-a}')s, energy used 
 sleep 12
 log "wifi: $(nmcli -t -f DEVICE,STATE device | grep ^wlan0) ; ping laptop: $(ping -c2 -W2 192.168.0.29 >/dev/null && echo ok || echo FAIL)"
 p=$(pgrep -x Hyprland); log "Hyprland: pid=$p libmali=$(grep -c libmali /proc/$p/maps 2>/dev/null)  bar: $(pgrep -cx quickshell)"
-log "locked: $(runuser -u zoan -- $E omarchy-shell lock isLocked 2>/dev/null)"
-log "speaker sink: $(runuser -u zoan -- $E wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | grep -c Speaker)"
+log "locked: $(runuser -u "$U" -- $E omarchy-shell lock isLocked 2>/dev/null)"
+log "speaker sink: $(runuser -u "$U" -- $E wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | grep -c Speaker)"
 log "palm filter: $(systemctl is-active quigon-palm-filter)"
 journalctl -k -b --since "-2min" --no-pager | grep -iE "PM: suspend|PM: resume|Freezing|Restarting|error|fail|timeout" | grep -viE "mtk_memif|sx9324" | tail -15

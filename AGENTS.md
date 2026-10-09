@@ -1,6 +1,6 @@
 # Notes for coding agents
 
-This repo is private for now and may be made public later, so write everything as if it were public.
+This repo is public, so keep everything in it safe to publish.
 
 ## Privacy
 
