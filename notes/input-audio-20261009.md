@@ -52,3 +52,15 @@ itself worked (`mem_sleep` is `s2idle` only). Hyprland 0.56's Lua parser accepts
 - Apps started before `pipewire-pulse` existed (Chrome) have no audio connection until restarted.
 - ChromeOS's CRAS caps the speaker at -3.25 dB at 100% volume (`/etc/cras/quigon.rt1019.rt5682s/*.card_settings`,
   explicit `db_at_N` curve), likely speaker protection. Not replicated yet.
+
+## Sleep (s2idle) and thermals
+
+[`scripts/sleeptest.sh`](../scripts/sleeptest.sh) (RTC `rtc0`, mt6359 PMIC, `wakealarm` +30 s, then `systemctl suspend`):
+suspend_stats success 1 / fail 0; ~29 s asleep; Omarchy's lock screen came up (user unlocked); wlan0 reconnected and
+the laptop answered ping; Hyprland still on libmali, bar running, speaker sink present, palm filter active. Kernel log
+on resume: one `mediatek-drm-dp 11b70000.edp-tx: Failed to do AUX transfer: -110` (display came back fine). Battery
+drain over 30 s is below the gauge's resolution; an overnight lid-closed test is still to do. Lid → suspend uses the
+logind default; Omarchy's idle: screensaver 150 s, lock 300 s (same as the other Omarchy machines).
+
+Fanless: `cros_ec` hwmon exposes fan1–4 but all read 0 rpm with no fault; cooling devices are only cpufreq (cpu0, cpu6)
+and GPU devfreq. SoC ~40–42 °C at light load.
