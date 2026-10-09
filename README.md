@@ -35,9 +35,9 @@ Experimental device port, not an installer.
 
 ## To do
 
-- **Swap on the internal drive** when Omarchy moves to the internal UFS (dual-boot or replacing ChromeOS): a swap file or
-  partition as low-priority overflow behind the 15.4G zram, which also makes hibernation possible. Not on the USB stick.
-- Move from the USB stick to the internal drive (dual-boot via the spare KERN-C/ROOT-C slots, or replace ChromeOS).
+- **Rebuild the ChromeOS kernel** (`chromeos-6.6`, obiwan/quigon config) with: `CONFIG_DISK_BASED_SWAP` (disk swap is
+  refused without it; then add a swap file on ROOT-C behind zram), `CONFIG_MEMCG` (systemd-oomd), `CONFIG_NF_TABLES`
+  (firewall), `CONFIG_VT`/fbcon (boot console), maybe `CONFIG_HIBERNATION`. Sign with the devkeys like today's kernel.
 - HDMI/DisplayPort audio (UCM devices left out until tested with a display attached).
 - Firewall (ufw cut all traffic on this kernel; check `xt_conntrack`, test with an auto-revert).
 - Syncthing folders; hardware video decode (MediaTek vcodec) for Chrome; re-sync script for ChromeOS kernel/modules/firmware/

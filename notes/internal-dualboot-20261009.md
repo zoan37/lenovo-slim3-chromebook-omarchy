@@ -29,3 +29,19 @@ libs copied to `/opt/quigon-cros-tools` (`cgpt` needs only libuuid + glibc), so 
   to ChromeOS; the USB stick still boots with Ctrl+U. [`quigon-boot-good.service`](../port/quigon/root/usr/local/libexec/quigon/boot-good)
   marks KERN-C `successful=1` with priority above A/B once the internal system is up.
 - `crossystem dev_default_boot=disk` again (was usb); `dev_boot_usb=1` stays, so the stick is a rescue system.
+
+## First boot from the internal drive
+
+- Booted on the first try; `quigon-boot-good` marked KERN-C `priority=3 tries=0 successful=1` (KERN-A stays 2).
+- **Disk swap is impossible on this kernel**: `swapon` returns `EINVAL` (no kernel message) for a fallocated file, a
+  dd-written file, and a file behind a `--direct-io` loop device. The ChromeOS kernel has `# CONFIG_DISK_BASED_SWAP is not
+  set`, a ChromeOS option that limits swap to zram. Also `# CONFIG_HIBERNATION is not set`, so no hibernation either.
+  Swapfile and its fstab line removed. Disk swap needs a rebuilt kernel (`chromeos-6.6` + `CONFIG_DISK_BASED_SWAP=y`).
+- **Quickshell (Omarchy bar) crash loop** after the reboot: with apps defaulting to Zink, and then with no Mesa override
+  at all, Qt Quick crashed in Mesa's Wayland EGL `swapBuffers` → `dri2_query_image` (Mesa picked the mediatek display
+  node as a GPU). It worked before only because the pre-reboot session still had the old llvmpipe variables. The bar is
+  started by Hyprland, so it inherits the compositor unit's environment (`gpu.env`), not later `systemctl --user
+  set-environment` changes. Fix: `gpu.env` now also sets `LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe` (libmali ignores
+  them; Hyprland's children get llvmpipe), the launcher exports the llvmpipe variables for apps again, and Zink is opt-in
+  per app with [`quigon-zink`](../port/quigon/root/usr/local/bin/quigon-zink). Crashed shells leave
+  `/usr/bin/quickshell` crash-handler processes under `systemd --user`; `pkill -x quickshell` before restarting.

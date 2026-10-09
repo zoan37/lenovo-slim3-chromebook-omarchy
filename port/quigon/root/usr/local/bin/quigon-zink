@@ -1,0 +1,7 @@
+#!/bin/bash
+# Run one app's Mesa OpenGL on the Mali through Zink (Mesa GL on the Mali Vulkan driver). Opt-in because Zink can't
+# export images on this driver: apps that pass GL buffers around as DMA-BUFs (Qt Quick, Chromium/Electron GBM) crash or
+# fall back. Usage: quigon-zink <command> [args...]
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+exec "$@"
