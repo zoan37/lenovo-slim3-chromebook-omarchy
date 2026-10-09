@@ -51,7 +51,7 @@ if [[ -n ${FULL:-} ]]; then
   # FULL=1: boot the real Omarchy install on ROOT-C (sda7) instead of the test initramfs (rdinit points nowhere, so
   # the kernel skips the embedded initramfs and mounts root= itself). No boot-time watchdog arming: nothing in
   # Omarchy feeds it. The console still lands in pstore for mainline-log.
-  echo "console=tty0 loglevel=6 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused irqchip.gicv3_pseudo_nmi=1 rdinit=/quigon-no-initramfs init=/sbin/init root=/dev/sda7 rootwait rw systemd.gpt_auto=0 net.ifnames=0 lsm=capability,landlock,yama,bpf cma=256M quigon.test=$tag $extra" > "$w/cmdline"
+  echo "console=tty0 loglevel=6 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused irqchip.gicv3_pseudo_nmi=1 rdinit=/quigon-no-initramfs init=/sbin/init root=/dev/sda7 rootwait rw systemd.gpt_auto=0 net.ifnames=0 lsm=capability,landlock,yama,bpf quigon.test=$tag $extra" > "$w/cmdline"
 else
   echo "loglevel=8 ignore_loglevel panic=5 softlockup_panic=1 hung_task_panic=1 clk_ignore_unused pd_ignore_unused regulator_ignore_unused mtk_wdt.start_timeout=31 watchdog.open_timeout=20 irqchip.gicv3_pseudo_nmi=1 rdinit=/init printk.devkmsg=on quigon.test=$tag $extra" > "$w/cmdline"
 fi

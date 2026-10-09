@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
-/* Bring-up variant: everything (PCIe included) plus the display, the EC/input devices and USB. */
+/* Bring-up variant: everything (PCIe included) plus the display, the EC/input devices, USB, the IOMMU and thermal. */
 #include "mt8189-quigon.dts"
 #include "mt8189-quigon-display.dtsi"
 #include "mt8189-quigon-input.dtsi"
 #include "mt8189-quigon-usb.dtsi"
+#include "mt8189-quigon-iommu.dtsi"
+#include "mt8189-quigon-thermal.dtsi"

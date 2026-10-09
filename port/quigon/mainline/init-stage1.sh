@@ -122,9 +122,9 @@ fi
 
 # PCIe controller (module, instrumented with numbered steps: see patches/mainline-pcie-gen3-qstep-debug.patch),
 # loaded under a timeout with the disk log running every second; quigon.qdelay=<ms> sets the pause after each step
-# (default 1500). If the link comes up, the MT7922 driver (mt7921e) follows.
+# (default 0). If the link comes up, the MT7922 driver (mt7921e) follows.
 if [ -f /lib/modules/pcie-mediatek-gen3.ko ] && ! grep -q quigon.pcie=manual /proc/cmdline; then
-  qd=$(sed -n 's/.*quigon\.qdelay=\([0-9]*\).*/\1/p' /proc/cmdline); qd=${qd:-1500}
+  qd=$(sed -n 's/.*quigon\.qdelay=\([0-9]*\).*/\1/p' /proc/cmdline); qd=${qd:-0}
   blkbg pcie; k "pcie: insmod start (qdelay=$qd)"
   insmod /lib/modules/pcie-mediatek-gen3.ko qdelay=$qd &
   ip=$!

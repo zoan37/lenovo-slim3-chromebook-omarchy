@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Multimedia IOMMU (M4U) for quigon: SMI common + the larbs whose clocks we have, from ChromeOS's mt8189.dtsi.
+ * mtk_iommu waits for every *available* larb in mediatek,larbs and skips disabled ones, so only larbs with a working
+ * clock/power path are listed (display larb0/larb1 now; the video decoder's larb4 comes with the vcodec dtsi).
+ * The display (OVL0/RDMA0) then scans out through the IOMMU instead of physically contiguous CMA buffers.
+ * Needs mt8189-quigon-display.dtsi (mmsys, mminfra clock controllers, the MM_INFRA/DISP power domains).
+ */
+#include <dt-bindings/memory/mediatek,mt8189-memory-port.h>
+
+/ {
+	soc {
+		smi_disp_common: smi@1e801000 {
+			compatible = "mediatek,mt8189-smi-common";
+			reg = <0 0x1e801000 0 0x1000>;
+			clocks = <&mminfra CLK_MMINFRA_SMI>, <&mminfra CLK_MMINFRA_SMI>;
+			clock-names = "apb", "smi";
+			power-domains = <&spm MT8189_POWER_DOMAIN_MM_INFRA>;
+		};
+
+		mm_iommu: iommu@1e802000 {
+			compatible = "mediatek,mt8189-iommu-mm";
+			reg = <0 0x1e802000 0 0x5000>;
+			interrupts = <GIC_SPI 278 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 279 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH 0>,
+				     <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH 0>;
+			clocks = <&mminfra CLK_MMINFRA_SMI>;
+			clock-names = "bclk";
+			power-domains = <&spm MT8189_POWER_DOMAIN_MM_INFRA>;
+			mediatek,larbs = <&smi_larb0 &smi_larb1>;
+			#iommu-cells = <1>;
+		};
+
+		smi_larb0: larb@1401c000 {
+			compatible = "mediatek,mt8189-smi-larb";
+			reg = <0 0x1401c000 0 0x1000>;
+			clocks = <&mmsys CLK_MM_SMI_LARB>, <&mmsys CLK_MM_SMI_LARB>;
+			clock-names = "apb", "smi";
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			mediatek,larb-id = <SMI_L0_ID>;
+			mediatek,smi = <&smi_disp_common>;
+		};
+
+		smi_larb1: larb@1401d000 {
+			compatible = "mediatek,mt8189-smi-larb";
+			reg = <0 0x1401d000 0 0x1000>;
+			clocks = <&mmsys CLK_MM_SMI_LARB>, <&mmsys CLK_MM_SMI_LARB>;
+			clock-names = "apb", "smi";
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			mediatek,larb-id = <SMI_L1_ID>;
+			mediatek,smi = <&smi_disp_common>;
+		};
+	};
+};
+
+&disp_ovl0 {
+	iommus = <&mm_iommu M4U_L0_P1_DISP_OVL0_4L_RDMA0>,
+		 <&mm_iommu M4U_L1_P2_DISP_OVL0_4L_RDMA1>,
+		 <&mm_iommu M4U_L0_P3_DISP_OVL0_4L_RDMA2>,
+		 <&mm_iommu M4U_L1_P4_DISP_OVL0_4L_RDMA3>,
+		 <&mm_iommu M4U_L0_P0_DISP_OVL0_4L_HDR>;
+};
+
+&disp_rdma0 {
+	iommus = <&mm_iommu M4U_L0_P5_DISP_RDMA0>;
+};

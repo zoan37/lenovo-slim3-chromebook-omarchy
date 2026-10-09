@@ -1,0 +1,328 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Audio for quigon (obiwan baseboard, the "rt5682s-rt1019p" SKU ChromeOS picks on this machine), from ChromeOS's
+ * mt8189.dtsi / mt8189-skywalker.dtsi / mt8189-skywalker-obiwan{.dts,-rt5682s-rt1019p.dtso}, mapped onto mainline:
+ *
+ *   AFE (mediatek,mt8189-afe-pcm, sound/soc/mediatek/mt8189) at 0x11050000, audio power domain, DMA pool at 0x60000000.
+ *     Mainline moved the I2S/DMIC/PCM pin switching from the card into the AFE: its DAPM pinctrl widgets look up
+ *     "aud-gpio-i2s0-on/off" (I2SIN0 DI + I2SOUT0 MCK/BCK/LRCK/DO, to the headset codec), "aud-gpio-i2s1-on/off"
+ *     (I2SIN1 DI + I2SOUT1, to the speaker amp), "aud-gpio-pcm-*" (PCM0 to the HDMI bridge), "aud-gpio-ap-dmic-*" and
+ *     "aud-gpio-ap-dmic1-*" on the AFE device itself. ChromeOS splits I2S in/out into separate states; same pinmux.
+ *   Headset: Realtek RT5682S on I2C2 @ 0x1a, IRQ on GPIO 4 (HP_INT_ODL), I2SOUT0/I2SIN0 (I2SIN0 shares I2SOUT0's clocks,
+ *     the driver default). Clocked from BCLK through its PLL (the machine driver's rtxxxx ops), so no MCLK clock.
+ *   Speakers: Realtek RT1019P (GPIO-only amp, rt1015p driver), SDB on GPIO 5 (EN_SPKR), on I2SOUT1.
+ *   Internal mic: SoC DMIC on the DMIC1 pins (GPIO 122/123) -> AP_DMIC_CH34 (obiwan has no AP_DMIC_BE link in ChromeOS).
+ *   Card: mainline's mt8189-nau8825 machine driver, "mediatek,mt8189-rt5682s" variant (ChromeOS: "...-rt5682s-sound").
+ *     The card MUST have audio-routing: without it the common MediaTek probe takes the "legacy" path and ignores the
+ *     dai-link nodes (every BE gets the dummy codec). Model name kept as ChromeOS's.
+ *   Not described: HDMI audio (ITE IT61620 DSI->HDMI bridge, no mainline driver) and DP audio over USB-C (the DP TX
+ *     isn't enabled yet); their BE links fall back to the dummy codec.
+ *
+ * Needs pp3300_z1 (mt8189-quigon-input.dtsi), so include this after it.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	rt1019p: audio-amplifier {
+		compatible = "realtek,rt1019p";
+		pinctrl-names = "default";
+		pinctrl-0 = <&audio_spk_en_pins>;
+		sdb-gpios = <&pio 5 GPIO_ACTIVE_HIGH>;
+		#sound-dai-cells = <0>;
+	};
+
+	dmic_codec: dmic-codec {
+		compatible = "dmic-codec";
+		num-channels = <2>;
+		wakeup-delay-ms = <100>;
+		#sound-dai-cells = <0>;
+	};
+
+	sound: sound {
+		compatible = "mediatek,mt8189-rt5682s";
+		model = "mt8189_1019_rt5682s";
+		mediatek,platform = <&afe>;
+
+		/* card widgets: "Headphone Jack" / "Headset Mic" are added by the machine driver's headset init */
+		audio-routing = "Headphone Jack", "HPOL",
+				"Headphone Jack", "HPOR",
+				"IN1P", "Headset Mic";
+
+		dai-link-0 {
+			link-name = "I2SOUT1_BE";
+			dai-format = "i2s";
+			mediatek,clk-provider = "cpu";
+
+			codec {
+				sound-dai = <&rt1019p>;
+			};
+		};
+
+		dai-link-1 {
+			link-name = "I2SOUT0_BE";
+			dai-format = "i2s";
+			mediatek,clk-provider = "cpu";
+
+			codec {
+				sound-dai = <&rt5682s 0>;
+			};
+		};
+
+		dai-link-2 {
+			link-name = "I2SIN0_BE";
+			dai-format = "i2s";
+			mediatek,clk-provider = "cpu";
+
+			codec {
+				sound-dai = <&rt5682s 0>;
+			};
+		};
+
+		dai-link-3 {
+			link-name = "AP_DMIC_CH34_BE";
+
+			codec {
+				sound-dai = <&dmic_codec>;
+			};
+		};
+	};
+};
+
+&{/soc} {
+	afe: audio-controller@11050000 {
+		compatible = "mediatek,mt8189-afe-pcm";
+		reg = <0 0x11050000 0 0x10000>;
+		interrupts = <GIC_SPI 392 IRQ_TYPE_LEVEL_HIGH 0>;
+		memory-region = <&afe_dma_mem_reserved>;
+		power-domains = <&spm MT8189_POWER_DOMAIN_AUDIO>;
+		mediatek,apmixedsys = <&apmixedsys>;
+		clocks = <&topckgen CLK_TOP_AUD_INTBUS_SEL>,
+			 <&topckgen CLK_TOP_AUD_ENGEN1_SEL>,
+			 <&topckgen CLK_TOP_AUD_ENGEN2_SEL>,
+			 <&topckgen CLK_TOP_AUDIO_H_SEL>,
+			 <&apmixedsys CLK_APMIXED_APLL1>,
+			 <&apmixedsys CLK_APMIXED_APLL2>,
+			 <&topckgen CLK_TOP_APLL1_D4>,
+			 <&topckgen CLK_TOP_APLL2_D4>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_I2SIN0>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_I2SIN1>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_I2SOUT0>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_I2SOUT1>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_FMI2S>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_TDMOUT_M>,
+			 <&topckgen CLK_TOP_APLL12_CK_DIV_TDMOUT_B>,
+			 <&topckgen CLK_TOP_AUD_1_SEL>,
+			 <&topckgen CLK_TOP_AUD_2_SEL>,
+			 <&topckgen CLK_TOP_APLL_I2SIN0_MCK_SEL>,
+			 <&topckgen CLK_TOP_APLL_I2SIN1_MCK_SEL>,
+			 <&topckgen CLK_TOP_APLL_I2SOUT0_MCK_SEL>,
+			 <&topckgen CLK_TOP_APLL_I2SOUT1_MCK_SEL>,
+			 <&topckgen CLK_TOP_APLL_FMI2S_MCK_SEL>,
+			 <&topckgen CLK_TOP_APLL_TDMOUT_MCK_SEL>,
+			 <&clk26m>,
+			 <&peri_ao CLK_PERAO_AUDIO0>,
+			 <&peri_ao CLK_PERAO_AUDIO1>,
+			 <&peri_ao CLK_PERAO_AUDIO2>;
+		clock-names = "top_aud_intbus",
+			      "top_aud_eng1",
+			      "top_aud_eng2",
+			      "top_aud_h",
+			      "apll1",
+			      "apll2",
+			      "apll1_d4",
+			      "apll2_d4",
+			      "apll12_div_i2sin0",
+			      "apll12_div_i2sin1",
+			      "apll12_div_i2sout0",
+			      "apll12_div_i2sout1",
+			      "apll12_div_fmi2s",
+			      "apll12_div_tdmout_m",
+			      "apll12_div_tdmout_b",
+			      "top_apll1",
+			      "top_apll2",
+			      "top_i2sin0",
+			      "top_i2sin1",
+			      "top_i2sout0",
+			      "top_i2sout1",
+			      "top_fmi2s",
+			      "top_dptx",
+			      "clk26m",
+			      "aud_slv_ck_peri",
+			      "aud_mst_ck_peri",
+			      "aud_intbus_ck_peri";
+		pinctrl-names = "aud-gpio-i2s0-off", "aud-gpio-i2s0-on",
+				"aud-gpio-i2s1-off", "aud-gpio-i2s1-on",
+				"aud-gpio-pcm-off", "aud-gpio-pcm-on",
+				"aud-gpio-ap-dmic-off", "aud-gpio-ap-dmic-on",
+				"aud-gpio-ap-dmic1-off", "aud-gpio-ap-dmic1-on";
+		pinctrl-0 = <&aud_gpio_i2s0_off>;
+		pinctrl-1 = <&aud_gpio_i2s0_on>;
+		pinctrl-2 = <&aud_gpio_i2s1_off>;
+		pinctrl-3 = <&aud_gpio_i2s1_on>;
+		pinctrl-4 = <&aud_gpio_pcm_off>;
+		pinctrl-5 = <&aud_gpio_pcm_on>;
+		pinctrl-6 = <&aud_gpio_ap_dmic_off>;
+		pinctrl-7 = <&aud_gpio_ap_dmic_on>;
+		pinctrl-8 = <&aud_gpio_ap_dmic1_off>;
+		pinctrl-9 = <&aud_gpio_ap_dmic1_on>;
+	};
+};
+
+&i2c2 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pins>;
+	status = "okay";
+
+	rt5682s: audio-codec@1a {
+		compatible = "realtek,rt5682s";
+		reg = <0x1a>;
+		interrupts-extended = <&pio 4 IRQ_TYPE_EDGE_BOTH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&audio_codec_pins>;
+		#sound-dai-cells = <1>;
+		AVDD-supply = <&mt6359_vio18_ldo_reg>;
+		DBVDD-supply = <&mt6359_vio18_ldo_reg>;
+		LDO1-IN-supply = <&mt6359_vio18_ldo_reg>;
+		MICVDD-supply = <&pp3300_z1>;
+		realtek,jd-src = <1>;
+	};
+};
+
+/* ChromeOS skywalker keeps the PMIC's audio LDO on */
+&mt6359_vaud18_ldo_reg {
+	regulator-always-on;
+};
+
+&pio {
+	i2c2_pins: i2c2-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO55__FUNC_SCL2>,
+				 <PINMUX_GPIO56__FUNC_SDA2>;
+			bias-disable;
+		};
+	};
+
+	audio_spk_en_pins: audio-spk-en-pins {
+		pins-spk-en {
+			pinmux = <PINMUX_GPIO5__FUNC_GPIO5>;
+			output-low;
+		};
+	};
+
+	audio_codec_pins: audio-codec-pins {
+		pins-hp-int-odl {
+			pinmux = <PINMUX_GPIO4__FUNC_GPIO4>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	/* I2SIN0 DI + I2SOUT0 (headset codec) */
+	aud_gpio_i2s0_off: aud-gpio-i2s0-off-pins {
+		pins-i2s {
+			pinmux = <PINMUX_GPIO106__FUNC_GPIO106>,
+				 <PINMUX_GPIO107__FUNC_GPIO107>,
+				 <PINMUX_GPIO108__FUNC_GPIO108>,
+				 <PINMUX_GPIO109__FUNC_GPIO109>,
+				 <PINMUX_GPIO110__FUNC_GPIO110>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_gpio_i2s0_on: aud-gpio-i2s0-on-pins {
+		pins-i2s {
+			pinmux = <PINMUX_GPIO106__FUNC_I2SIN0_DI>,
+				 <PINMUX_GPIO107__FUNC_I2SOUT0_MCK>,
+				 <PINMUX_GPIO108__FUNC_I2SOUT0_BCK>,
+				 <PINMUX_GPIO109__FUNC_I2SOUT0_LRCK>,
+				 <PINMUX_GPIO110__FUNC_I2SOUT0_DO>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	/* I2SIN1 DI + I2SOUT1 (speaker amp) */
+	aud_gpio_i2s1_off: aud-gpio-i2s1-off-pins {
+		pins-i2s {
+			pinmux = <PINMUX_GPIO130__FUNC_GPIO130>,
+				 <PINMUX_GPIO111__FUNC_GPIO111>,
+				 <PINMUX_GPIO112__FUNC_GPIO112>,
+				 <PINMUX_GPIO113__FUNC_GPIO113>,
+				 <PINMUX_GPIO114__FUNC_GPIO114>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_gpio_i2s1_on: aud-gpio-i2s1-on-pins {
+		pins-i2s {
+			pinmux = <PINMUX_GPIO130__FUNC_I2SIN1_DI>,
+				 <PINMUX_GPIO111__FUNC_I2SOUT1_MCK>,
+				 <PINMUX_GPIO112__FUNC_I2SOUT1_BCK>,
+				 <PINMUX_GPIO113__FUNC_I2SOUT1_LRCK>,
+				 <PINMUX_GPIO114__FUNC_I2SOUT1_DO>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_gpio_pcm_off: aud-gpio-pcm-off-pins {
+		pins-pcm {
+			pinmux = <PINMUX_GPIO115__FUNC_GPIO115>,
+				 <PINMUX_GPIO116__FUNC_GPIO116>,
+				 <PINMUX_GPIO118__FUNC_GPIO118>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_gpio_pcm_on: aud-gpio-pcm-on-pins {
+		pins-pcm {
+			pinmux = <PINMUX_GPIO115__FUNC_PCM0_CLK>,
+				 <PINMUX_GPIO116__FUNC_PCM0_SYNC>,
+				 <PINMUX_GPIO118__FUNC_PCM0_DO>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_gpio_ap_dmic_off: aud-gpio-ap-dmic-off-pins {
+		pins-dmic {
+			pinmux = <PINMUX_GPIO119__FUNC_GPIO119>,
+				 <PINMUX_GPIO120__FUNC_GPIO120>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_gpio_ap_dmic_on: aud-gpio-ap-dmic-on-pins {
+		pins-dmic {
+			pinmux = <PINMUX_GPIO119__FUNC_DMIC0_CLK>,
+				 <PINMUX_GPIO120__FUNC_DMIC0_DAT0>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_gpio_ap_dmic1_off: aud-gpio-ap-dmic1-off-pins {
+		pins-dmic {
+			pinmux = <PINMUX_GPIO122__FUNC_GPIO122>,
+				 <PINMUX_GPIO123__FUNC_GPIO123>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_gpio_ap_dmic1_on: aud-gpio-ap-dmic1-on-pins {
+		pins-dmic {
+			pinmux = <PINMUX_GPIO122__FUNC_DMIC1_CLK>,
+				 <PINMUX_GPIO123__FUNC_DMIC1_DAT0>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+};

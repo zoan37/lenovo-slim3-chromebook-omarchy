@@ -1,0 +1,144 @@
+Panfrost: optional read-only vertex-stage SSBOs (PAN_RO_VERTEX_SSBO=1), against Mesa 26.2.4.
+
+Ghostty's GL 4.3 renderer reads a std430 `readonly buffer` from its vertex shader (cell_text.v.glsl), and stock
+Panfrost advertises 0 vertex SSBOs ("Too many vertex shader storage blocks (1/0)"). Panfrost keeps vertex side
+effects off because IDVS splits a vertex shader into position and varying shaders that may each run (and may
+re-shade vertices), and transform feedback runs a second copy of the shader: writes and atomics would repeat.
+Reads are idempotent, so they are safe in both IDVS halves; everything else for vertex SSBOs (resource tables
+on v9+, sysvals on Bifrost, LD_PKA/LEA_PKA in the compiler) already exists for the fragment/compute stages and
+PanVK and is stage-agnostic.
+
+With PAN_RO_VERTEX_SSBO=1 (default off, Bifrost and newer):
+- the vertex stage reports 16 shader buffers, like fragment/compute (the GL frontend splits them 8 SSBO +
+  8 atomic-counter buffers); vertex images stay at 0;
+- panfrost_create_shader_state() removes store_ssbo/ssbo_atomic/ssbo_atomic_swap from vertex shaders (atomics
+  return 0) with a one-time warning, before the shader is hashed, so the GPU never sees vertex-stage writes.
+
+diff --git a/src/gallium/drivers/panfrost/pan_screen.c b/src/gallium/drivers/panfrost/pan_screen.c
+index 23659ae..2d1b233 100644
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -564,6 +564,16 @@ panfrost_init_shader_caps(struct panfrost_screen *screen)
+        */
+       bool allow_side_effects = (i != MESA_SHADER_VERTEX);
+ 
++      /* Reading memory from the vertex stage is fine with IDVS (the position
++       * and varying shaders may both read, and reads have no observable
++       * effect), so with PAN_RO_VERTEX_SSBO=1 vertex shaders get SSBOs too.
++       * Vertex shader SSBO writes and atomics are removed at CSO creation, so
++       * the hardware still never sees vertex-stage side effects. Images stay
++       * disabled.
++       */
++      bool allow_vertex_ssbo = i == MESA_SHADER_VERTEX &&
++                               screen->ro_vertex_ssbo && dev->arch >= 6;
++
+       caps->max_instructions =
+       caps->max_alu_instructions =
+       caps->max_tex_instructions =
+@@ -594,7 +604,8 @@ panfrost_init_shader_caps(struct panfrost_screen *screen)
+       STATIC_ASSERT(PIPE_MAX_SHADER_SAMPLER_VIEWS < 0x10000);
+       caps->max_sampler_views = PIPE_MAX_SHADER_SAMPLER_VIEWS;
+       caps->supported_irs = (1 << PIPE_SHADER_IR_NIR);
+-      caps->max_shader_buffers = allow_side_effects ? 16 : 0;
++      caps->max_shader_buffers =
++         (allow_side_effects || allow_vertex_ssbo) ? 16 : 0;
+       caps->max_shader_images = allow_side_effects ? PIPE_MAX_SHADER_IMAGES : 0;
+    }
+ }
+@@ -1026,6 +1037,7 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+       debug_get_num_option("PAN_FAULT_INJECTION_RATE", 0);
+    screen->max_afbc_packing_ratio = debug_get_num_option(
+       "PAN_MAX_AFBC_PACKING_RATIO", DEFAULT_MAX_AFBC_PACKING_RATIO);
++   screen->ro_vertex_ssbo = debug_get_bool_option("PAN_RO_VERTEX_SSBO", false);
+ 
+    pan_trace_init();
+ 
+diff --git a/src/gallium/drivers/panfrost/pan_screen.h b/src/gallium/drivers/panfrost/pan_screen.h
+index 88382a1..5c72cd1 100644
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -141,6 +141,12 @@ struct panfrost_screen {
+    bool afbcp_gpu_payload_sizes;
+ 
+    int force_afrc_rate;
++
++   /* PAN_RO_VERTEX_SSBO=1: expose SSBOs to vertex shaders for apps that only
++    * read them (e.g. Ghostty's GL 4.3 renderer). Writes are dropped, see
++    * panfrost_create_shader_state().
++    */
++   bool ro_vertex_ssbo;
+    uint64_t compute_core_mask;
+    uint64_t fragment_core_mask;
+ 
+diff --git a/src/gallium/drivers/panfrost/pan_shader.c b/src/gallium/drivers/panfrost/pan_shader.c
+index 920be21..ebb111f 100644
+--- a/src/gallium/drivers/panfrost/pan_shader.c
++++ b/src/gallium/drivers/panfrost/pan_shader.c
+@@ -496,6 +496,55 @@ panfrost_default_shader_key(struct panfrost_uncompiled_shader *so)
+    return key;
+ }
+ 
++/* PAN_RO_VERTEX_SSBO: vertex shaders may only read SSBOs. IDVS runs the
++ * position and varying parts of a vertex shader separately and may shade a
++ * vertex more than once, and transform feedback runs a second copy of the
++ * shader, so writes and atomics would be repeated. Drop them (atomics return
++ * 0) and warn once rather than let them reach the hardware.
++ */
++static bool
++panfrost_drop_vs_ssbo_write(nir_builder *b, nir_intrinsic_instr *intr,
++                            void *data)
++{
++   switch (intr->intrinsic) {
++   case nir_intrinsic_store_ssbo:
++   case nir_intrinsic_ssbo_atomic:
++   case nir_intrinsic_ssbo_atomic_swap:
++      break;
++   default:
++      return false;
++   }
++
++   if (nir_intrinsic_infos[intr->intrinsic].has_dest) {
++      b->cursor = nir_before_instr(&intr->instr);
++      nir_def_replace(&intr->def, nir_imm_zero(b, intr->def.num_components,
++                                               intr->def.bit_size));
++   } else {
++      nir_instr_remove(&intr->instr);
++   }
++
++   return true;
++}
++
++static void
++panfrost_make_vs_ssbo_read_only(nir_shader *nir)
++{
++   bool progress = false;
++
++   NIR_PASS(progress, nir, nir_shader_intrinsics_pass,
++            panfrost_drop_vs_ssbo_write, nir_metadata_control_flow, NULL);
++
++   if (progress) {
++      static bool warned = false;
++      if (!warned) {
++         mesa_logw("panfrost: PAN_RO_VERTEX_SSBO: vertex shader SSBO writes "
++                   "and atomics are not supported and were dropped");
++         warned = true;
++      }
++      nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
++   }
++}
++
+ static void *
+ panfrost_create_shader_state(struct pipe_context *pctx,
+                              const struct pipe_shader_state *cso)
+@@ -506,6 +555,11 @@ panfrost_create_shader_state(struct pipe_context *pctx,
+                         ? tgsi_to_nir(cso->tokens, pctx->screen, false)
+                         : cso->ir.nir;
+ 
++   /* Before panfrost_alloc_shader(), so its cache key covers the result. */
++   if (nir->info.stage == MESA_SHADER_VERTEX &&
++       pan_screen(pctx->screen)->ro_vertex_ssbo)
++      panfrost_make_vs_ssbo_read_only(nir);
++
+    struct panfrost_uncompiled_shader *so = panfrost_alloc_shader(nir);
+ 
+    /* The driver gets ownership of the nir_shader for graphics. The NIR is
