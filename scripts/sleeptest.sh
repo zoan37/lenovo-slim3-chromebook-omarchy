@@ -3,7 +3,7 @@
 N=${1:-30}
 B=/sys/class/power_supply/sbs-10-000b
 log() { echo "$(date +%T) $*"; }
-U=${DESKTOP_USER:-$(id -nu 1000)}; uid=$(id -u "$U"); sig=$(ls -t /run/user/$uid/hypr | head -1)
+U=${DESKTOP_USER:-$(systemctl list-units --plain --no-legend "quigon-desktop@*" | sed -n "s/^quigon-desktop@\(.*\)\.service.*/\1/p" | head -1)}; uid=$(id -u "$U"); sig=$(ls -t /run/user/$uid/hypr | head -1)
 E="env XDG_RUNTIME_DIR=/run/user/$uid HYPRLAND_INSTANCE_SIGNATURE=$sig DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus PATH=/usr/share/omarchy/bin:/usr/bin"
 e0=$(cat $B/energy_now); t0=$(date +%s.%N); s0=$(cat /sys/power/suspend_stats/success 2>/dev/null)
 log "before: energy=${e0}uWh battery=$(cat $B/capacity)% status=$(cat $B/status) suspend_success=$s0"

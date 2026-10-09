@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Path
+Target = usr/share/applications/*.desktop
+
+[Action]
+Description = Routing Electron apps to the Mali GPU (quigon-electron-sync)...
+When = PostTransaction
+Exec = /usr/local/bin/quigon-electron-sync

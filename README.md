@@ -29,7 +29,7 @@ Experimental device port, not an installer.
 | Firewall | **ufw on** (iptables-legacy; IPv6 rules patched, logging off: kernel lacks nftables, `xt_LOG`, `xt_hl`, `ip6t_rt`): [notes/personal-setup-20261008.md](notes/personal-setup-20261008.md#firewall-ufw-on-iptables-legacy-working-since-2026-10-09) |
 | Hardware video decode | Not usable from Linux Chrome (decoder outputs MediaTek MM21 only) |
 | Hyprland + Omarchy | **Works**: Omarchy 4.0.4 (official aarch64 `edge` packages), uwsm session on seat0, NetworkManager: [notes/desktop-20261008.md](notes/desktop-20261008.md) |
-| GPU (Mali-G57 on kbase r54p1) | **On the GPU**: Hyprland and Chrome on ChromeOS's own `libmali` GLES (RELR patch + EGL shim, + minigbm for Chrome); GTK 4 apps on libmali Vulkan via a patched ARM vulkan-wsi-layer; other OpenGL apps via Zink; Ghostty via a patched private Zink. [notes/gpu-20261008.md](notes/gpu-20261008.md) |
+| GPU (Mali-G57 on kbase r54p1) | **On the GPU**: Hyprland, Chrome and every Electron app (auto-routed by `quigon-electron-sync`) on ChromeOS's own `libmali` GLES (RELR patch + EGL shim, + minigbm for Chromium); GTK 4 apps on libmali Vulkan via a patched ARM vulkan-wsi-layer; other OpenGL apps via Zink; Ghostty via a patched private Zink. [notes/gpu-20261008.md](notes/gpu-20261008.md) |
 
 ## Layout
 
