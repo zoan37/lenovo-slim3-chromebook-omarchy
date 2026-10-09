@@ -1,0 +1,3595 @@
+diff --git a/drivers/clk/mediatek/Kconfig b/drivers/clk/mediatek/Kconfig
+index 87e622270..4e703d58f 100644
+--- a/drivers/clk/mediatek/Kconfig
++++ b/drivers/clk/mediatek/Kconfig
+@@ -889,6 +889,12 @@ config COMMON_CLK_MT8189_MFG
+ 	help
+ 	  Clock driver for the MT8189 GPU (MFG) subsystem.
+ 
++config COMMON_CLK_MT8189_MMSYS
++	tristate "Clock driver for MediaTek MT8189 display (mmsys, mminfra)"
++	depends on COMMON_CLK_MT8189
++	help
++	  Clock driver for the MT8189 display (MMSYS) and multimedia infra (MMINFRA) gates.
++
+ config COMMON_CLK_MT8189_SCP
+ 	tristate "Clock driver for MediaTek MT8189 scp"
+ 	depends on COMMON_CLK_MT8189
+diff --git a/drivers/clk/mediatek/Makefile b/drivers/clk/mediatek/Makefile
+index a0631a178..42f6ffa48 100644
+--- a/drivers/clk/mediatek/Makefile
++++ b/drivers/clk/mediatek/Makefile
+@@ -131,6 +131,7 @@ obj-$(CONFIG_COMMON_CLK_MT8189_DBGAO) += clk-mt8189-dbgao.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_DVFSRC) += clk-mt8189-dvfsrc.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_IIC) += clk-mt8189-iic.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_MFG) += clk-mt8189-mfg.o
++obj-$(CONFIG_COMMON_CLK_MT8189_MMSYS) += clk-mt8189-mmsys.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_SCP) += clk-mt8189-scp.o
+ obj-$(CONFIG_COMMON_CLK_MT8189_UFS) += clk-mt8189-ufs.o
+ obj-$(CONFIG_COMMON_CLK_MT8192) += clk-mt8192-apmixedsys.o clk-mt8192.o
+diff --git a/drivers/clk/mediatek/clk-mt8189-mmsys.c b/drivers/clk/mediatek/clk-mt8189-mmsys.c
+new file mode 100644
+index 000000000..44702a23a
+--- /dev/null
++++ b/drivers/clk/mediatek/clk-mt8189-mmsys.c
+@@ -0,0 +1,165 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * MediaTek MT8189 display clocks: the MMSYS (dispsys) gates, registered as a child of the
++ * mediatek,mt8189-mmsys node by mtk-mmsys (like clk-mt8188-vdo0.c), plus the MMINFRA gates.
++ * Gate layout from ChromeOS's clk-mt8189-mmsys.c (Copyright (c) 2024 MediaTek Inc.,
++ * Qiqi Wang <qiqi.wang@mediatek.com>); there the MM gates sit in a separate node at mmsys + 0x100.
++ */
++
++#include <dt-bindings/clock/mediatek,mt8189-clk.h>
++#include <linux/clk-provider.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++
++#include "clk-gate.h"
++#include "clk-mtk.h"
++
++static const struct mtk_gate_regs mm0_cg_regs = {
++	.set_ofs = 0x104,
++	.clr_ofs = 0x108,
++	.sta_ofs = 0x100,
++};
++
++static const struct mtk_gate_regs mm1_cg_regs = {
++	.set_ofs = 0x114,
++	.clr_ofs = 0x118,
++	.sta_ofs = 0x110,
++};
++
++#define GATE_MM0(_id, _name, _parent, _shift)				\
++	GATE_MTK(_id, _name, _parent, &mm0_cg_regs, _shift, &mtk_clk_gate_ops_setclr)
++
++#define GATE_MM1(_id, _name, _parent, _shift)				\
++	GATE_MTK_FLAGS(_id, _name, _parent, &mm1_cg_regs, _shift,	\
++		       &mtk_clk_gate_ops_setclr, CLK_SET_RATE_PARENT)
++
++static const struct mtk_gate mm_clks[] = {
++	/* MM0 */
++	GATE_MM0(CLK_MM_DISP_OVL0_4L, "mm_disp_ovl0_4l", "disp0_sel", 0),
++	GATE_MM0(CLK_MM_DISP_OVL1_4L, "mm_disp_ovl1_4l", "disp0_sel", 1),
++	GATE_MM0(CLK_MM_VPP_RSZ0, "mm_vpp_rsz0", "disp0_sel", 2),
++	GATE_MM0(CLK_MM_VPP_RSZ1, "mm_vpp_rsz1", "disp0_sel", 3),
++	GATE_MM0(CLK_MM_DISP_RDMA0, "mm_disp_rdma0", "disp0_sel", 4),
++	GATE_MM0(CLK_MM_DISP_RDMA1, "mm_disp_rdma1", "disp0_sel", 5),
++	GATE_MM0(CLK_MM_DISP_COLOR0, "mm_disp_color0", "disp0_sel", 6),
++	GATE_MM0(CLK_MM_DISP_COLOR1, "mm_disp_color1", "disp0_sel", 7),
++	GATE_MM0(CLK_MM_DISP_CCORR0, "mm_disp_ccorr0", "disp0_sel", 8),
++	GATE_MM0(CLK_MM_DISP_CCORR1, "mm_disp_ccorr1", "disp0_sel", 9),
++	GATE_MM0(CLK_MM_DISP_CCORR2, "mm_disp_ccorr2", "disp0_sel", 10),
++	GATE_MM0(CLK_MM_DISP_CCORR3, "mm_disp_ccorr3", "disp0_sel", 11),
++	GATE_MM0(CLK_MM_DISP_AAL0, "mm_disp_aal0", "disp0_sel", 12),
++	GATE_MM0(CLK_MM_DISP_AAL1, "mm_disp_aal1", "disp0_sel", 13),
++	GATE_MM0(CLK_MM_DISP_GAMMA0, "mm_disp_gamma0", "disp0_sel", 14),
++	GATE_MM0(CLK_MM_DISP_GAMMA1, "mm_disp_gamma1", "disp0_sel", 15),
++	GATE_MM0(CLK_MM_DISP_DITHER0, "mm_disp_dither0", "disp0_sel", 16),
++	GATE_MM0(CLK_MM_DISP_DITHER1, "mm_disp_dither1", "disp0_sel", 17),
++	GATE_MM0(CLK_MM_DISP_DSC_WRAP0, "mm_disp_dsc_wrap0", "disp0_sel", 18),
++	GATE_MM0(CLK_MM_VPP_MERGE0, "mm_vpp_merge0", "disp0_sel", 19),
++	GATE_MM0(CLK_MMSYS_0_DISP_DVO, "mmsys_0_disp_dvo", "disp0_sel", 20),
++	GATE_MM0(CLK_MMSYS_0_DISP_DSI0, "mmsys_0_disp_dsi0", "disp0_sel", 21),
++	GATE_MM0(CLK_MM_DP_INTF0, "mm_dp_intf0", "disp0_sel", 22),
++	GATE_MM0(CLK_MM_DPI0, "mm_dpi0", "disp0_sel", 23),
++	GATE_MM0(CLK_MM_DISP_WDMA0, "mm_disp_wdma0", "disp0_sel", 24),
++	GATE_MM0(CLK_MM_DISP_WDMA1, "mm_disp_wdma1", "disp0_sel", 25),
++	GATE_MM0(CLK_MM_DISP_FAKE_ENG0, "mm_disp_fake_eng0", "disp0_sel", 26),
++	GATE_MM0(CLK_MM_DISP_FAKE_ENG1, "mm_disp_fake_eng1", "disp0_sel", 27),
++	GATE_MM0(CLK_MM_SMI_LARB, "mm_smi_larb", "disp0_sel", 28),
++	GATE_MM0(CLK_MM_DISP_MUTEX0, "mm_disp_mutex0", "disp0_sel", 29),
++	GATE_MM0(CLK_MM_DIPSYS_CONFIG, "mm_dipsys_config", "disp0_sel", 30),
++	GATE_MM0(CLK_MM_DUMMY, "mm_dummy", "disp0_sel", 31),
++	/* MM1: pixel/interface clocks, rate set through the parent mux */
++	GATE_MM1(CLK_MMSYS_1_DISP_DSI0, "mmsys_1_disp_dsi0", "dsi_occ_sel", 0),
++	GATE_MM1(CLK_MMSYS_1_LVDS_ENCODER, "mmsys_1_lvds_encoder", "pll_dpix_sel", 1),
++	GATE_MM1(CLK_MMSYS_1_DPI0, "mmsys_1_dpi0", "pll_dpix_sel", 2),
++	GATE_MM1(CLK_MMSYS_1_DISP_DVO, "mmsys_1_disp_dvo", "edp_sel", 3),
++	GATE_MM1(CLK_MM_DP_INTF, "mm_dp_intf", "dp_sel", 4),
++	GATE_MM1(CLK_MMSYS_1_LVDS_ENCODER_CTS, "mmsys_1_lvds_encoder_cts", "vdstx_dg_cts_sel", 5),
++	GATE_MM1(CLK_MMSYS_1_DISP_DVO_AVT, "mmsys_1_disp_dvo_avt", "edp_favt_sel", 6),
++};
++
++static const struct mtk_clk_desc mm_desc = {
++	.clks = mm_clks,
++	.num_clks = ARRAY_SIZE(mm_clks),
++};
++
++static const struct platform_device_id clk_mt8189_mmsys_id_table[] = {
++	{ .name = "clk-mt8189-mmsys", .driver_data = (kernel_ulong_t)&mm_desc },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(platform, clk_mt8189_mmsys_id_table);
++
++static struct platform_driver clk_mt8189_mmsys_drv = {
++	.probe = mtk_clk_pdev_probe,
++	.remove = mtk_clk_pdev_remove,
++	.driver = {
++		.name = "clk-mt8189-mmsys",
++	},
++	.id_table = clk_mt8189_mmsys_id_table,
++};
++
++static const struct mtk_gate_regs mminfra0_cg_regs = {
++	.set_ofs = 0x104,
++	.clr_ofs = 0x108,
++	.sta_ofs = 0x100,
++};
++
++static const struct mtk_gate_regs mminfra1_cg_regs = {
++	.set_ofs = 0x114,
++	.clr_ofs = 0x118,
++	.sta_ofs = 0x110,
++};
++
++#define GATE_MMINFRA0(_id, _name, _parent, _shift)			\
++	GATE_MTK(_id, _name, _parent, &mminfra0_cg_regs, _shift, &mtk_clk_gate_ops_setclr)
++
++#define GATE_MMINFRA1(_id, _name, _parent, _shift)			\
++	GATE_MTK(_id, _name, _parent, &mminfra1_cg_regs, _shift, &mtk_clk_gate_ops_setclr)
++
++static const struct mtk_gate mminfra_clks[] = {
++	GATE_MMINFRA0(CLK_MMINFRA_GCE_D, "mminfra_gce_d", "mminfra_sel", 0),
++	GATE_MMINFRA0(CLK_MMINFRA_GCE_M, "mminfra_gce_m", "mminfra_sel", 1),
++	GATE_MMINFRA0(CLK_MMINFRA_SMI, "mminfra_smi", "mminfra_sel", 2),
++	GATE_MMINFRA1(CLK_MMINFRA_GCE_26M, "mminfra_gce_26m", "mminfra_sel", 17),
++};
++
++static const struct mtk_clk_desc mminfra_desc = {
++	.clks = mminfra_clks,
++	.num_clks = ARRAY_SIZE(mminfra_clks),
++	/* registers live in the MM_INFRA power domain */
++	.need_runtime_pm = true,
++};
++
++static const struct of_device_id of_match_clk_mt8189_mminfra[] = {
++	{ .compatible = "mediatek,mt8189-mm-infra", .data = &mminfra_desc },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, of_match_clk_mt8189_mminfra);
++
++static struct platform_driver clk_mt8189_mminfra_drv = {
++	.probe = mtk_clk_simple_probe,
++	.remove = mtk_clk_simple_remove,
++	.driver = {
++		.name = "clk-mt8189-mminfra",
++		.of_match_table = of_match_clk_mt8189_mminfra,
++	},
++};
++
++static struct platform_driver * const clk_mt8189_mm_drivers[] = {
++	&clk_mt8189_mmsys_drv,
++	&clk_mt8189_mminfra_drv,
++};
++
++static int __init clk_mt8189_mm_init(void)
++{
++	return platform_register_drivers(clk_mt8189_mm_drivers, ARRAY_SIZE(clk_mt8189_mm_drivers));
++}
++module_init(clk_mt8189_mm_init);
++
++static void __exit clk_mt8189_mm_exit(void)
++{
++	platform_unregister_drivers(clk_mt8189_mm_drivers, ARRAY_SIZE(clk_mt8189_mm_drivers));
++}
++module_exit(clk_mt8189_mm_exit);
++
++MODULE_DESCRIPTION("MediaTek MT8189 display (mmsys) and mminfra clocks driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/mediatek/Makefile b/drivers/gpu/drm/mediatek/Makefile
+index 952d29464..cdc355526 100644
+--- a/drivers/gpu/drm/mediatek/Makefile
++++ b/drivers/gpu/drm/mediatek/Makefile
+@@ -13,6 +13,7 @@ mediatek-drm-y := mtk_crtc.o \
+ 		  mtk_drm_drv.o \
+ 		  mtk_dsi.o \
+ 		  mtk_dpi.o \
++		  mtk_dvo.o \
+ 		  mtk_ethdr.o \
+ 		  mtk_mdp_rdma.o \
+ 		  mtk_padding.o \
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.c b/drivers/gpu/drm/mediatek/mtk_crtc.c
+index 2920f3198..216901410 100644
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.c
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.c
+@@ -387,6 +387,8 @@ static int mtk_crtc_ddp_hw_init(struct mtk_crtc *mtk_crtc)
+ 		goto err_mutex_unprepare;
+ 	}
+ 
++	mtk_mmsys_default_config(mtk_crtc->mmsys_dev);
++
+ 	for (i = 0; i < mtk_crtc->ddp_comp_nr - 1; i++) {
+ 		if (!mtk_ddp_comp_connect(mtk_crtc->ddp_comp[i], mtk_crtc->mmsys_dev,
+ 					  mtk_crtc->ddp_comp[i + 1]->id))
+@@ -1031,6 +1033,16 @@ int mtk_crtc_create(struct drm_device *drm_dev, const unsigned int *path,
+ 		node = priv->comp_node[comp_id];
+ 		comp = &priv->ddp_comp[comp_id];
+ 
++		/*
++		 * Virtual components (mmsys crossbar stages) have neither a DTS
++		 * node nor a device; they are only used for mmsys routing, so
++		 * just set up their id and funcs here.
++		 */
++		if (mtk_ddp_comp_get_type(comp_id) == MTK_DISP_VIRTUAL) {
++			mtk_ddp_comp_init(dev, NULL, comp, comp_id);
++			continue;
++		}
++
+ 		/* Not all drm components have a DTS device node, such as ovl_adaptor,
+ 		 * which is the drm bring up sub driver
+ 		 */
+diff --git a/drivers/gpu/drm/mediatek/mtk_ddp_comp.c b/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
+index 9672ea1f9..b68cfdf07 100644
+--- a/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
++++ b/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
+@@ -308,6 +308,26 @@ static const struct mtk_ddp_comp_funcs ddp_dpi = {
+ 	.encoder_index = mtk_dpi_encoder_index,
+ };
+ 
++/*
++ * Virtual components are mmsys crossbar stages without a device node or
++ * driver: they only take part in mmsys routing (mtk_mmsys_ddp_connect() by
++ * component id) and own no MUTEX MOD bit, so make mutex add/remove a no-op.
++ */
++static void mtk_ddp_virtual_mutex_nop(struct device *dev, struct mtk_mutex *mutex)
++{
++}
++
++static const struct mtk_ddp_comp_funcs ddp_virtual = {
++	.add = mtk_ddp_virtual_mutex_nop,
++	.remove = mtk_ddp_virtual_mutex_nop,
++};
++
++static const struct mtk_ddp_comp_funcs ddp_dvo = {
++	.start = mtk_dvo_start,
++	.stop = mtk_dvo_stop,
++	.encoder_index = mtk_dvo_encoder_index,
++};
++
+ static const struct mtk_ddp_comp_funcs ddp_dsc = {
+ 	.clk_enable = mtk_ddp_clk_enable,
+ 	.clk_disable = mtk_ddp_clk_disable,
+@@ -442,10 +462,12 @@ static const char * const mtk_ddp_comp_stem[MTK_DDP_COMP_TYPE_MAX] = {
+ 	[MTK_DISP_PWM] = "pwm",
+ 	[MTK_DISP_RDMA] = "rdma",
+ 	[MTK_DISP_UFOE] = "ufoe",
++	[MTK_DISP_VIRTUAL] = "virtual",
+ 	[MTK_DISP_WDMA] = "wdma",
+ 	[MTK_DP_INTF] = "dp-intf",
+ 	[MTK_DPI] = "dpi",
+ 	[MTK_DSI] = "dsi",
++	[MTK_DVO] = "dvo",
+ };
+ 
+ struct mtk_ddp_comp_match {
+@@ -473,6 +495,8 @@ static const struct mtk_ddp_comp_match mtk_ddp_matches[DDP_COMPONENT_DRM_ID_MAX]
+ 	[DDP_COMPONENT_DSI1]		= { MTK_DSI,			1, &ddp_dsi },
+ 	[DDP_COMPONENT_DSI2]		= { MTK_DSI,			2, &ddp_dsi },
+ 	[DDP_COMPONENT_DSI3]		= { MTK_DSI,			3, &ddp_dsi },
++	[DDP_COMPONENT_DVO0]		= { MTK_DVO,			0, &ddp_dvo },
++	[DDP_COMPONENT_DVO1]		= { MTK_DVO,			1, &ddp_dvo },
+ 	[DDP_COMPONENT_GAMMA]		= { MTK_DISP_GAMMA,		0, &ddp_gamma },
+ 	[DDP_COMPONENT_MERGE0]		= { MTK_DISP_MERGE,		0, &ddp_merge },
+ 	[DDP_COMPONENT_MERGE1]		= { MTK_DISP_MERGE,		1, &ddp_merge },
+@@ -498,6 +522,8 @@ static const struct mtk_ddp_comp_match mtk_ddp_matches[DDP_COMPONENT_DRM_ID_MAX]
+ 	[DDP_COMPONENT_UFOE]		= { MTK_DISP_UFOE,		0, &ddp_ufoe },
+ 	[DDP_COMPONENT_WDMA0]		= { MTK_DISP_WDMA,		0, NULL },
+ 	[DDP_COMPONENT_WDMA1]		= { MTK_DISP_WDMA,		1, NULL },
++	[DDP_COMPONENT_COMP0_OUT_CB4]	= { MTK_DISP_VIRTUAL,		-1, &ddp_virtual },
++	[DDP_COMPONENT_COMP0_OUT_CB5]	= { MTK_DISP_VIRTUAL,		-1, &ddp_virtual },
+ };
+ 
+ static bool mtk_ddp_comp_find(struct device *dev,
+@@ -544,8 +570,9 @@ static bool mtk_ddp_path_available(const unsigned int *path,
+ 		return false;
+ 
+ 	for (i = 0U; i < path_len; i++) {
+-		/* OVL_ADAPTOR doesn't have a device node */
+-		if (path[i] == DDP_COMPONENT_DRM_OVL_ADAPTOR)
++		/* OVL_ADAPTOR and virtual (crossbar) components have no device node */
++		if (path[i] == DDP_COMPONENT_DRM_OVL_ADAPTOR ||
++		    mtk_ddp_comp_get_type(path[i]) == MTK_DISP_VIRTUAL)
+ 			continue;
+ 
+ 		if (!comp_node[path[i]])
+@@ -555,6 +582,14 @@ static bool mtk_ddp_path_available(const unsigned int *path,
+ 	return true;
+ }
+ 
++enum mtk_ddp_comp_type mtk_ddp_comp_get_type(unsigned int comp_id)
++{
++	if (comp_id >= ARRAY_SIZE(mtk_ddp_matches))
++		return MTK_DDP_COMP_TYPE_MAX;
++
++	return mtk_ddp_matches[comp_id].type;
++}
++
+ int mtk_ddp_comp_get_id(struct device_node *node,
+ 			enum mtk_ddp_comp_type comp_type)
+ {
+@@ -679,7 +714,8 @@ int mtk_ddp_comp_init(struct device *dev, struct device_node *node, struct mtk_d
+ 	    type == MTK_DISP_RDMA ||
+ 	    type == MTK_DPI ||
+ 	    type == MTK_DP_INTF ||
+-	    type == MTK_DSI)
++	    type == MTK_DSI ||
++	    type == MTK_DVO)
+ 		return 0;
+ 
+ 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+diff --git a/drivers/gpu/drm/mediatek/mtk_ddp_comp.h b/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
+index 3f3d43f43..fbef8ccc2 100644
+--- a/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
++++ b/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
+@@ -39,10 +39,12 @@ enum mtk_ddp_comp_type {
+ 	MTK_DISP_PWM,
+ 	MTK_DISP_RDMA,
+ 	MTK_DISP_UFOE,
++	MTK_DISP_VIRTUAL,
+ 	MTK_DISP_WDMA,
+ 	MTK_DPI,
+ 	MTK_DP_INTF,
+ 	MTK_DSI,
++	MTK_DVO,
+ 	MTK_DDP_COMP_TYPE_MAX,
+ };
+ 
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_drv.h b/drivers/gpu/drm/mediatek/mtk_disp_drv.h
+index 679d413bf..e6664b08d 100644
+--- a/drivers/gpu/drm/mediatek/mtk_disp_drv.h
++++ b/drivers/gpu/drm/mediatek/mtk_disp_drv.h
+@@ -47,6 +47,10 @@ void mtk_dpi_start(struct device *dev);
+ void mtk_dpi_stop(struct device *dev);
+ unsigned int mtk_dpi_encoder_index(struct device *dev);
+ 
++void mtk_dvo_start(struct device *dev);
++void mtk_dvo_stop(struct device *dev);
++unsigned int mtk_dvo_encoder_index(struct device *dev);
++
+ void mtk_dsi_ddp_start(struct device *dev);
+ void mtk_dsi_ddp_stop(struct device *dev);
+ unsigned int mtk_dsi_encoder_index(struct device *dev);
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+index 97a899e4b..31f9dadb6 100644
+--- a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
++++ b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+@@ -734,6 +734,22 @@ static const struct mtk_disp_ovl_data mt8192_ovl_2l_driver_data = {
+ 	.num_formats = ARRAY_SIZE(mt8173_formats),
+ };
+ 
++/* MT8189: same OVL features and formats as MT8195 */
++static const struct mtk_disp_ovl_data mt8189_ovl_driver_data = {
++	.addr = DISP_REG_OVL_ADDR_MT8173,
++	.gmc_bits = 10,
++	.layer_nr = 4,
++	.fmt_rgb565_is_0 = true,
++	.smi_id_en = true,
++	.supports_afbc = true,
++	.blend_modes = BIT(DRM_MODE_BLEND_PREMULTI) |
++		       BIT(DRM_MODE_BLEND_COVERAGE) |
++		       BIT(DRM_MODE_BLEND_PIXEL_NONE),
++	.formats = mt8195_formats,
++	.num_formats = ARRAY_SIZE(mt8195_formats),
++	.supports_clrfmt_ext = true,
++};
++
+ static const struct mtk_disp_ovl_data mt8195_ovl_driver_data = {
+ 	.addr = DISP_REG_OVL_ADDR_MT8173,
+ 	.gmc_bits = 10,
+@@ -760,6 +776,8 @@ static const struct of_device_id mtk_disp_ovl_driver_dt_match[] = {
+ 	  .data = &mt8183_ovl_driver_data},
+ 	{ .compatible = "mediatek,mt8183-disp-ovl-2l",
+ 	  .data = &mt8183_ovl_2l_driver_data},
++	{ .compatible = "mediatek,mt8189-disp-ovl",
++	  .data = &mt8189_ovl_driver_data},
+ 	{ .compatible = "mediatek,mt8192-disp-ovl",
+ 	  .data = &mt8192_ovl_driver_data},
+ 	{ .compatible = "mediatek,mt8192-disp-ovl-2l",
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_rdma.c b/drivers/gpu/drm/mediatek/mtk_disp_rdma.c
+index c9d41d75e..593d9d144 100644
+--- a/drivers/gpu/drm/mediatek/mtk_disp_rdma.c
++++ b/drivers/gpu/drm/mediatek/mtk_disp_rdma.c
+@@ -394,6 +394,12 @@ static const struct mtk_disp_rdma_data mt8183_rdma_driver_data = {
+ 	.num_formats = ARRAY_SIZE(mt8173_formats),
+ };
+ 
++static const struct mtk_disp_rdma_data mt8189_rdma_driver_data = {
++	.fifo_size = 1920,
++	.formats = mt8173_formats,
++	.num_formats = ARRAY_SIZE(mt8173_formats),
++};
++
+ static const struct mtk_disp_rdma_data mt8195_rdma_driver_data = {
+ 	.fifo_size = 1920,
+ 	.formats = mt8173_formats,
+@@ -407,6 +413,8 @@ static const struct of_device_id mtk_disp_rdma_driver_dt_match[] = {
+ 	  .data = &mt8173_rdma_driver_data},
+ 	{ .compatible = "mediatek,mt8183-disp-rdma",
+ 	  .data = &mt8183_rdma_driver_data},
++	{ .compatible = "mediatek,mt8189-disp-rdma",
++	  .data = &mt8189_rdma_driver_data},
+ 	{ .compatible = "mediatek,mt8195-disp-rdma",
+ 	  .data = &mt8195_rdma_driver_data},
+ 	{},
+diff --git a/drivers/gpu/drm/mediatek/mtk_dp.c b/drivers/gpu/drm/mediatek/mtk_dp.c
+index f656b85b8..580810d5f 100644
+--- a/drivers/gpu/drm/mediatek/mtk_dp.c
++++ b/drivers/gpu/drm/mediatek/mtk_dp.c
+@@ -16,6 +16,7 @@
+ #include <drm/drm_print.h>
+ #include <drm/drm_probe_helper.h>
+ #include <linux/arm-smccc.h>
++#include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/errno.h>
+@@ -39,6 +40,12 @@
+ #define MTK_DP_SIP_ATF_EDP_VIDEO_UNMUTE	(BIT(0) | BIT(5))
+ #define MTK_DP_SIP_ATF_VIDEO_UNMUTE	BIT(5)
+ 
++/* eDP TX v2 (MT8189) TF-A video mute/unmute call parameters */
++#define MTK_EDP_SIP_VIDEO_UNMUTE	0x22
++#define MTK_EDP_SIP_VIDEO_UNMUTE_MAGIC	0xfefd
++
++#define MTK_EDP_AUX_LDO_READY_TIMEOUT_US	100000
++
+ #define MTK_DP_THREAD_CABLE_STATE_CHG	BIT(0)
+ #define MTK_DP_THREAD_HPD_EVENT		BIT(1)
+ 
+@@ -66,6 +73,17 @@ enum {
+ 	MTK_DP_CAL_MAX,
+ };
+ 
++/*
++ * eDP TX IP version. MTK_EDP_VER_NONE is the original MT8195-style (e)DP
++ * TX; anything else is the newer eDP TX IP with the PHY in a separate
++ * register range, HPD in the AUX block and a PHY power state machine
++ * in ENC_P0_3.
++ */
++enum mtk_edp_ver {
++	MTK_EDP_VER_NONE = 0,
++	MTK_EDP_VER_MT8189,
++};
++
+ struct mtk_dp_train_info {
+ 	bool sink_ssc;
+ 	bool cable_plugged_in;
+@@ -104,6 +122,8 @@ struct mtk_dp {
+ 	int irq;
+ 	u8 max_lanes;
+ 	u8 max_linkrate;
++	/* Forced voltage swing level for link training (0 = use sink request) */
++	u32 swing_level;
+ 	u8 rx_cap[DP_RECEIVER_CAP_SIZE];
+ 	u32 cal_data[MTK_DP_CAL_MAX];
+ 	u32 irq_thread_handle;
+@@ -124,6 +144,9 @@ struct mtk_dp {
+ 	struct platform_device *phy_dev;
+ 	struct phy *phy;
+ 	struct regmap *regs;
++	/* eDP TX v2 only: PHY register range, shared with the PHY driver */
++	struct regmap *phy_regs;
++	struct clk *power_clk;
+ 	struct timer_list debounce_timer;
+ 
+ 	/* For audio */
+@@ -143,6 +166,8 @@ struct mtk_dp_data {
+ 	bool audio_supported;
+ 	bool audio_pkt_in_hblank_area;
+ 	u16 audio_m_div2_bit;
++	enum mtk_edp_ver edp_ver;
++	const char *phy_dev_name;
+ };
+ 
+ static const struct mtk_dp_efuse_fmt mt8188_dp_efuse_fmt[MTK_DP_CAL_MAX] = {
+@@ -402,6 +427,14 @@ static const struct regmap_config mtk_dp_regmap_config = {
+ 	.name = "mtk-dp-registers",
+ };
+ 
++static const struct regmap_config mtk_edp_phy_regmap_config = {
++	.reg_bits = 32,
++	.val_bits = 32,
++	.reg_stride = 4,
++	.max_register = 0x14fc,
++	.name = "mtk-edp-phy-registers",
++};
++
+ static struct mtk_dp *mtk_dp_from_bridge(struct drm_bridge *b)
+ {
+ 	return container_of(b, struct mtk_dp, bridge);
+@@ -515,7 +548,8 @@ static void mtk_dp_set_msa(struct mtk_dp *mtk_dp)
+ 			   vm->hsync_len,
+ 			   PGEN_HSYNC_PULSE_WIDTH_DP_ENC0_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3160,
+-			   vm->hback_porch + vm->hsync_len,
++			   vm->hback_porch + vm->hsync_len +
++			   (mtk_dp->data->edp_ver ? vm->hfront_porch : 0),
+ 			   PGEN_HFDE_START_DP_ENC0_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3164,
+ 			   vm->hactive,
+@@ -532,7 +566,8 @@ static void mtk_dp_set_msa(struct mtk_dp *mtk_dp)
+ 			   vm->vsync_len,
+ 			   PGEN_VSYNC_PULSE_WIDTH_DP_ENC0_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3174,
+-			   vm->vback_porch + vm->vsync_len,
++			   vm->vback_porch + vm->vsync_len +
++			   (mtk_dp->data->edp_ver ? vm->vfront_porch : 0),
+ 			   PGEN_VFDE_START_DP_ENC0_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3178,
+ 			   vm->vactive,
+@@ -612,7 +647,10 @@ static void mtk_dp_setup_encoder(struct mtk_dp *mtk_dp)
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_3364,
+ 			   FIFO_READ_START_POINT_DP_ENC1_P0_VAL << 12,
+ 			   FIFO_READ_START_POINT_DP_ENC1_P0_MASK);
+-	mtk_dp_write(mtk_dp, MTK_DP_ENC1_P0_3368, DP_ENC1_P0_3368_VAL);
++
++	/* eDP TX v2 programs ENC1_P0_3368 in mtk_dp_initialize_digital_settings() */
++	if (!mtk_dp->data->edp_ver)
++		mtk_dp_write(mtk_dp, MTK_DP_ENC1_P0_3368, DP_ENC1_P0_3368_VAL);
+ }
+ 
+ static void mtk_dp_pg_enable(struct mtk_dp *mtk_dp, bool enable)
+@@ -981,6 +1019,25 @@ static void mtk_dp_set_swing_pre_emphasis(struct mtk_dp *mtk_dp, int lane_num,
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_SWING_EMP,
+ 			   preemphasis << (DP_TX0_PRE_EMPH_SHIFT + lane_shift),
+ 			   DP_TX0_PRE_EMPH_MASK << lane_shift);
++
++	if (mtk_dp->data->edp_ver == MTK_EDP_VER_MT8189) {
++		/* The new PHY takes swing/pre-emphasis from its own registers */
++		regmap_update_bits(mtk_dp->phy_regs,
++				   MTK_EDP_PHYD_DRV_FORCE_LANE(lane_num),
++				   EDP_TX_LN_VOLT_SWING_VAL_MASK |
++				   EDP_TX_LN_PRE_EMPH_VAL_MASK |
++				   EDP_TX_LN_VOLT_SWING_EN |
++				   EDP_TX_LN_PRE_EMPH_EN,
++				   FIELD_PREP(EDP_TX_LN_VOLT_SWING_VAL_MASK, swing_val) |
++				   FIELD_PREP(EDP_TX_LN_PRE_EMPH_VAL_MASK, preemphasis) |
++				   EDP_TX_LN_VOLT_SWING_EN |
++				   EDP_TX_LN_PRE_EMPH_EN);
++	}
++
++	if (mtk_dp->data->edp_ver && preemphasis)
++		mtk_dp_update_bits(mtk_dp, RG_DSI_DEM_EN,
++				   DSI_DE_EMPHASIS_ENABLE,
++				   DSI_DE_EMPHASIS_ENABLE);
+ }
+ 
+ static void mtk_dp_reset_swing_pre_emphasis(struct mtk_dp *mtk_dp)
+@@ -1029,6 +1086,20 @@ static u32 mtk_dp_hwirq_get_clear(struct mtk_dp *mtk_dp)
+ 
+ static void mtk_dp_hwirq_enable(struct mtk_dp *mtk_dp, bool enable)
+ {
++	if (mtk_dp->data->edp_ver) {
++		/* HPD events are reported by the AUX block on eDP TX v2 */
++		if (enable)
++			mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3660, 0,
++					   HPD_CONNECT_EVENT_AUX_TX_P0 |
++					   HPD_INTERRUPT_EVENT_AUX_TX_P0 |
++					   HPD_DISCONNECT_EVENT_AUX_TX_P0);
++		else
++			mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3660,
++					   DP_TX_INT_MASK_AUX_TX_P0_MASK,
++					   DP_TX_INT_MASK_AUX_TX_P0_MASK);
++		return;
++	}
++
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TRANS_P0_3418,
+ 			   enable ? 0 :
+ 			   IRQ_MASK_DP_TRANS_P0_DISC_IRQ |
+@@ -1037,8 +1108,52 @@ static void mtk_dp_hwirq_enable(struct mtk_dp *mtk_dp, bool enable)
+ 			   IRQ_MASK_DP_TRANS_P0_MASK);
+ }
+ 
++static void mtk_edp_v2_initialize_settings(struct mtk_dp *mtk_dp)
++{
++	/* Frame start/end markers */
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F04, 0,
++			   FRAME_START_MARKER_0_DP_ENC_P0_3_MASK);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F08,
++			   FRAME_START_MARKER_1_DP_ENC_P0_3,
++			   FRAME_START_MARKER_1_DP_ENC_P0_3);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F0C,
++			   FRAME_END_MARKER_0_DP_ENC_P0_3,
++			   FRAME_END_MARKER_0_DP_ENC_P0_3);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F10,
++			   FRAME_END_MARKER_1_DP_ENC_P0_3,
++			   FRAME_END_MARKER_1_DP_ENC_P0_3);
++
++	/* Test bus selection */
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_33C0, 0,
++			   SDP_TESTBUS_SEL_DP_ENC1_P0_MASK);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_33C0,
++			   SDP_TESTBUS_SEL_BIT4_DP_ENC1_P0,
++			   SDP_TESTBUS_SEL_BIT4_DP_ENC1_P0);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_33C4,
++			   DP_TX_ENCODER_TESTBUS_SEL_DP_ENC1_P0,
++			   DP_TX_ENCODER_TESTBUS_SEL_DP_ENC1_P0_MASK);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F28,
++			   DP_TX_SDP_PSR_AS_TESTBUS,
++			   DP_TX_SDP_PSR_AS_TESTBUS_MASK);
++
++	/* Release all TOP soft resets and set up the probe mux */
++	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_RESET_AND_PROBE,
++			   RG_SW_RST_MASK, RG_SW_RST_MASK);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_RESET_AND_PROBE,
++			   RG_PROBE_LOW_SEL, RG_PROBE_LOW_SEL_MASK);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_RESET_AND_PROBE,
++			   RG_PROBE_LOW_HIGH_SWAP, RG_PROBE_LOW_HIGH_SWAP);
++
++	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_IRQ_MASK,
++			   ENCODER_IRQ_MSK | TRANS_IRQ_MSK,
++			   ENCODER_IRQ_MSK | TRANS_IRQ_MSK);
++}
++
+ static void mtk_dp_initialize_settings(struct mtk_dp *mtk_dp)
+ {
++	if (mtk_dp->data->edp_ver)
++		mtk_edp_v2_initialize_settings(mtk_dp);
++
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TRANS_P0_342C,
+ 			   XTAL_FREQ_DP_TRANS_P0_DEFAULT,
+ 			   XTAL_FREQ_DP_TRANS_P0_MASK);
+@@ -1057,6 +1172,16 @@ static void mtk_dp_initialize_settings(struct mtk_dp *mtk_dp)
+ static void mtk_dp_initialize_hpd_detect_settings(struct mtk_dp *mtk_dp)
+ {
+ 	u32 val;
++
++	if (mtk_dp->data->edp_ver) {
++		/* HPD IRQ threshold, the HPD logic lives in the AUX block */
++		mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_364C,
++				   FIELD_PREP(HPD_INT_THD_AUX_TX_P0_MASK,
++					      HPD_INT_THD_AUX_TX_P0_VAL),
++				   HPD_INT_THD_AUX_TX_P0_MASK);
++		return;
++	}
++
+ 	/* Debounce threshold */
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TRANS_P0_3410,
+ 			   8, HPD_DEB_THD_DP_TRANS_P0_MASK);
+@@ -1080,6 +1205,41 @@ static void mtk_dp_initialize_hpd_detect_settings(struct mtk_dp *mtk_dp)
+ 			   HPD_INT_THD_ECO_DP_TRANS_P0_MASK);
+ }
+ 
++static int mtk_edp_phyd_wait_aux_ldo_ready(struct mtk_dp *mtk_dp)
++{
++	u32 val;
++	int ret;
++
++	ret = regmap_read_poll_timeout(mtk_dp->phy_regs,
++				       MTK_EDP_PHYD_DIG_GLB_STATUS_0, val,
++				       val & (RGS_BG_CORE_EN_READY |
++					      RGS_AUX_LDO_EN_READY),
++				       MTK_EDP_AUX_LDO_READY_TIMEOUT_US / 100,
++				       MTK_EDP_AUX_LDO_READY_TIMEOUT_US);
++	if (ret)
++		dev_err(mtk_dp->dev, "eDP PHY bandgap/AUX LDO not ready\n");
++
++	return ret;
++}
++
++/*
++ * eDP TX v2: temporarily override the PHY power state machine with
++ * @state, wait for the bandgap/AUX LDO, then hand control back to HW.
++ */
++static void mtk_edp_phy_pwr_state_override(struct mtk_dp *mtk_dp, u32 state,
++					   bool wait_ready)
++{
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F44,
++			   PHY_PWR_STATE_OW_EN_DP_ENC_P0_3,
++			   PHY_PWR_STATE_OW_EN_DP_ENC_P0_3);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F44, state,
++			   PHY_PWR_STATE_OW_VALUE_DP_ENC_P0_3_MASK);
++	if (wait_ready)
++		mtk_edp_phyd_wait_aux_ldo_ready(mtk_dp);
++	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F44, 0,
++			   PHY_PWR_STATE_OW_EN_DP_ENC_P0_3);
++}
++
+ static void mtk_dp_initialize_aux_settings(struct mtk_dp *mtk_dp)
+ {
+ 	/* modify timeout threshold = 0x1595 */
+@@ -1088,12 +1248,18 @@ static void mtk_dp_initialize_aux_settings(struct mtk_dp *mtk_dp)
+ 			   AUX_TIMEOUT_THR_AUX_TX_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3658,
+ 			   0, AUX_TX_OV_EN_AUX_TX_P0_MASK);
++	if (mtk_dp->data->edp_ver)
++		mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_36A0,
++				   DP_TX_INIT_MASK_15_TO_2_AUX_TX_P0,
++				   DP_TX_INIT_MASK_15_TO_2_AUX_TX_P0);
+ 	/* 25 for 26M */
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3634,
+ 			   AUX_TX_OVER_SAMPLE_RATE_FOR_26M << 8,
+ 			   AUX_TX_OVER_SAMPLE_RATE_AUX_TX_P0_MASK);
+-	/* 13 for 26M */
++	/* 13 for 26M (14 on eDP TX v2, as validated by MediaTek) */
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3614,
++			   mtk_dp->data->edp_ver ?
++			   AUX_RX_UI_CNT_THR_AUX_FOR_26M_EDP_V2 :
+ 			   AUX_RX_UI_CNT_THR_AUX_FOR_26M,
+ 			   AUX_RX_UI_CNT_THR_AUX_TX_P0_MASK);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_37C8,
+@@ -1104,6 +1270,25 @@ static void mtk_dp_initialize_aux_settings(struct mtk_dp *mtk_dp)
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_3690,
+ 			   RX_REPLY_COMPLETE_MODE_AUX_TX_P0,
+ 			   RX_REPLY_COMPLETE_MODE_AUX_TX_P0);
++
++	if (mtk_dp->data->edp_ver) {
++		/* HPD connect/disconnect thresholds: 1.5ms + 5 x 0.1ms = 2ms */
++		mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_367C,
++				   FIELD_PREP(HPD_CONN_THD_AUX_TX_P0_MASK, 5),
++				   HPD_CONN_THD_AUX_TX_P0_MASK);
++		mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_37A0,
++				   FIELD_PREP(HPD_DISC_THD_AUX_TX_P0_MASK, 5),
++				   HPD_DISC_THD_AUX_TX_P0_MASK);
++		/* XTAL frequency (26MHz) for PSR and AUX */
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3FF8,
++				   FIELD_PREP(XTAL_FREQ_FOR_PSR_DP_ENC_P0_3_MASK,
++					      XTAL_FREQ_FOR_PSR_DP_ENC_P0_3_VAL),
++				   XTAL_FREQ_FOR_PSR_DP_ENC_P0_3_MASK);
++		mtk_dp_update_bits(mtk_dp, MTK_DP_AUX_P0_366C,
++				   FIELD_PREP(XTAL_FREQ_DP_TX_AUX_366C_MASK,
++					      XTAL_FREQ_DP_TX_AUX_366C_VAL),
++				   XTAL_FREQ_DP_TX_AUX_366C_MASK);
++	}
+ }
+ 
+ static void mtk_dp_initialize_digital_settings(struct mtk_dp *mtk_dp)
+@@ -1115,15 +1300,56 @@ static void mtk_dp_initialize_digital_settings(struct mtk_dp *mtk_dp)
+ 			   BS2BS_MODE_DP_ENC1_P0_VAL << 12,
+ 			   BS2BS_MODE_DP_ENC1_P0_MASK);
+ 
++	if (mtk_dp->data->edp_ver) {
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3000,
++				   DP_I_MODE_ENABLE_DP_ENC0_P0 |
++				   BS_SYMBOL_CNT_RESET_DP_ENC0_P0,
++				   DP_I_MODE_ENABLE_DP_ENC0_P0 |
++				   BS_SYMBOL_CNT_RESET_DP_ENC0_P0);
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_3368,
++				   VIDEO_SRAM_FIFO_CNT_RESET_SEL_DP_ENC1_P0,
++				   VIDEO_SRAM_FIFO_CNT_RESET_SEL_DP_ENC1_P0_MASK);
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC1_P0_3368,
++				   BS_FOLLOW_SEL_DP_ENC1_P0,
++				   BS_FOLLOW_SEL_DP_ENC1_P0);
++		/* Video SRAM start address */
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_303C,
++				   SRAM_START_READ_THRD_DP_ENC0_P0_EDP_VAL,
++				   SRAM_START_READ_THRD_DP_ENC0_P0_MASK);
++		/* Disable the PSR pattern generator */
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3F80, 0,
++				   PSR_PATGEN_AVT_EN_DP_ENC_P0_3);
++
++		/* Power up PHYD */
++		mtk_edp_phy_pwr_state_override(mtk_dp,
++					       PHY_PWR_STATE_ALL_POWER_ON,
++					       true);
++
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3FF8,
++				   PHY_STATE_W_1_DP_ENC_P0_3 |
++				   DVO_ON_W_1_DP_ENC_P0_3,
++				   PHY_STATE_W_1_DP_ENC_P0_3 |
++				   DVO_ON_W_1_DP_ENC_P0_3);
++	}
++
+ 	/* dp tx encoder reset all sw */
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3004,
+ 			   DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0,
+ 			   DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0);
+ 
++	if (mtk_dp->data->edp_ver) {
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3004,
++				   0, DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0);
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3FF8,
++				   PHY_STATE_RESET_ALL_DP_ENC_P0_3_MASK,
++				   PHY_STATE_RESET_ALL_DP_ENC_P0_3_MASK);
++	}
++
+ 	/* Wait for sw reset to complete */
+ 	usleep_range(1000, 5000);
+-	mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3004,
+-			   0, DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0);
++	if (!mtk_dp->data->edp_ver)
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC0_P0_3004,
++				   0, DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0);
+ }
+ 
+ static void mtk_dp_digital_sw_reset(struct mtk_dp *mtk_dp)
+@@ -1152,6 +1378,11 @@ static void mtk_dp_sdp_path_reset(struct mtk_dp *mtk_dp)
+ 
+ static void mtk_dp_set_lanes(struct mtk_dp *mtk_dp, int lanes)
+ {
++	if (mtk_dp->data->edp_ver)
++		mtk_edp_phy_pwr_state_override(mtk_dp,
++					       PHY_PWR_STATE_BIAS_POWER_ON,
++					       true);
++
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TRANS_P0_35F0,
+ 			   lanes == 0 ? 0 : DP_TRANS_DUMMY_RW_0,
+ 			   DP_TRANS_DUMMY_RW_0_MASK);
+@@ -1267,14 +1498,21 @@ static int mtk_dp_phy_configure(struct mtk_dp *mtk_dp,
+ 		}
+ 	};
+ 
+-	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_PWR_STATE, DP_PWR_STATE_BANDGAP,
+-			   DP_PWR_STATE_MASK);
++	if (!mtk_dp->data->edp_ver)
++		mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_PWR_STATE,
++				   DP_PWR_STATE_BANDGAP, DP_PWR_STATE_MASK);
+ 
+ 	ret = phy_configure(mtk_dp->phy, &phy_opts);
+ 	if (ret)
+ 		return ret;
+ 
+ 	mtk_dp_set_calibration_data(mtk_dp);
++
++	/* eDP TX v2: turn the PHY back on after reconfiguring it */
++	if (mtk_dp->data->edp_ver)
++		mtk_dp_update_bits(mtk_dp, MTK_DP_ENC_P0_3_3FF8,
++				   PHY_STATE_W_1_DP_ENC_P0_3,
++				   PHY_STATE_W_1_DP_ENC_P0_3);
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_TOP_PWR_STATE,
+ 			   DP_PWR_STATE_BANDGAP_TPLL_LANE, DP_PWR_STATE_MASK);
+ 
+@@ -1332,9 +1570,15 @@ static void mtk_dp_video_mute(struct mtk_dp *mtk_dp, bool enable)
+ 			   VIDEO_MUTE_SEL_DP_ENC0_P0 |
+ 			   VIDEO_MUTE_SW_DP_ENC0_P0);
+ 
+-	arm_smccc_smc(MTK_DP_SIP_CONTROL_AARCH32,
+-		      mtk_dp->data->smc_cmd, enable,
+-		      0, 0, 0, 0, 0, &res);
++	if (mtk_dp->data->edp_ver)
++		arm_smccc_smc(MTK_DP_SIP_CONTROL_AARCH32,
++			      MTK_EDP_SIP_VIDEO_UNMUTE, enable,
++			      (MTK_EDP_SIP_VIDEO_UNMUTE << 16) | enable,
++			      MTK_EDP_SIP_VIDEO_UNMUTE_MAGIC, 0, 0, 0, &res);
++	else
++		arm_smccc_smc(MTK_DP_SIP_CONTROL_AARCH32,
++			      mtk_dp->data->smc_cmd, enable,
++			      0, 0, 0, 0, 0, &res);
+ 
+ 	dev_dbg(mtk_dp->dev, "smc cmd: 0x%x, p1: %s, ret: 0x%lx-0x%lx\n",
+ 		mtk_dp->data->smc_cmd, enable ? "enable" : "disable", res.a0, res.a1);
+@@ -1410,6 +1654,10 @@ static void mtk_dp_power_enable(struct mtk_dp *mtk_dp)
+ static void mtk_dp_power_disable(struct mtk_dp *mtk_dp)
+ {
+ 	mtk_dp_write(mtk_dp, MTK_DP_TOP_PWR_STATE, 0);
++	if (mtk_dp->data->edp_ver)
++		mtk_edp_phy_pwr_state_override(mtk_dp,
++					       PHY_PWR_STATE_ALL_POWER_OFF,
++					       false);
+ 
+ 	mtk_dp_update_bits(mtk_dp, MTK_DP_0034,
+ 			   DA_CKM_CKTX0_EN_FORCE_EN, DA_CKM_CKTX0_EN_FORCE_EN);
+@@ -1424,7 +1672,8 @@ static void mtk_dp_initialize_priv_data(struct mtk_dp *mtk_dp)
+ {
+ 	bool plugged_in = (mtk_dp->bridge.type == DRM_MODE_CONNECTOR_eDP);
+ 
+-	mtk_dp->train_info.link_rate = DP_LINK_BW_5_4;
++	mtk_dp->train_info.link_rate = mtk_dp->data->edp_ver ?
++				       DP_LINK_BW_8_1 : DP_LINK_BW_5_4;
+ 	mtk_dp->train_info.lane_count = mtk_dp->max_lanes;
+ 	mtk_dp->train_info.cable_plugged_in = plugged_in;
+ 
+@@ -1545,8 +1794,11 @@ static void mtk_dp_train_update_swing_pre(struct mtk_dp *mtk_dp, int lanes,
+ 		int index = lane / 2;
+ 		int shift = lane % 2 ? DP_ADJUST_VOLTAGE_SWING_LANE1_SHIFT : 0;
+ 
+-		swing = (dpcd_adjust_req[index] >> shift) &
+-			DP_ADJUST_VOLTAGE_SWING_LANE0_MASK;
++		if (mtk_dp->swing_level)
++			swing = mtk_dp->swing_level;
++		else
++			swing = (dpcd_adjust_req[index] >> shift) &
++				DP_ADJUST_VOLTAGE_SWING_LANE0_MASK;
+ 		preemphasis = ((dpcd_adjust_req[index] >> shift) &
+ 			       DP_ADJUST_PRE_EMPHASIS_LANE0_MASK) >>
+ 			      DP_ADJUST_PRE_EMPHASIS_LANE0_SHIFT;
+@@ -1969,6 +2221,11 @@ static void mtk_dp_init_port(struct mtk_dp *mtk_dp)
+ 	mtk_dp_initialize_hpd_detect_settings(mtk_dp);
+ 
+ 	mtk_dp_digital_sw_reset(mtk_dp);
++
++	if (mtk_dp->data->edp_ver)
++		mtk_dp_update_bits(mtk_dp, MTK_EDP_TOP_CLKGEN_0,
++				   EDP_TX_TOP_CLKGEN_RST_MASK,
++				   EDP_TX_TOP_CLKGEN_RST_MASK);
+ }
+ 
+ static irqreturn_t mtk_dp_hpd_event_thread(int hpd, void *dev)
+@@ -2067,9 +2324,14 @@ static int mtk_dp_wait_hpd_asserted(struct drm_dp_aux *mtk_aux, unsigned long wa
+ 	u32 val;
+ 	int ret;
+ 
+-	ret = regmap_read_poll_timeout(mtk_dp->regs, MTK_DP_TRANS_P0_3414,
+-				       val, !!(val & HPD_DB_DP_TRANS_P0_MASK),
+-				       wait_us / 100, wait_us);
++	if (mtk_dp->data->edp_ver)
++		ret = regmap_read_poll_timeout(mtk_dp->regs, MTK_DP_AUX_P0_364C,
++					       val, !!(val & HPD_STATUS_AUX_TX_P0),
++					       wait_us / 100, wait_us);
++	else
++		ret = regmap_read_poll_timeout(mtk_dp->regs, MTK_DP_TRANS_P0_3414,
++					       val, !!(val & HPD_DB_DP_TRANS_P0_MASK),
++					       wait_us / 100, wait_us);
+ 	if (ret) {
+ 		mtk_dp->train_info.cable_plugged_in = false;
+ 		return ret;
+@@ -2104,6 +2366,27 @@ static int mtk_dp_dt_parse(struct mtk_dp *mtk_dp,
+ 	if (IS_ERR(mtk_dp->regs))
+ 		return PTR_ERR(mtk_dp->regs);
+ 
++	if (mtk_dp->data->edp_ver) {
++		/* The eDP TX v2 PHY has its own register range */
++		base = devm_platform_ioremap_resource(pdev, 1);
++		if (IS_ERR(base))
++			return dev_err_probe(dev, PTR_ERR(base),
++					     "Failed to map PHY registers\n");
++
++		mtk_dp->phy_regs = devm_regmap_init_mmio(dev, base,
++							 &mtk_edp_phy_regmap_config);
++		if (IS_ERR(mtk_dp->phy_regs))
++			return PTR_ERR(mtk_dp->phy_regs);
++
++		/* Optional board specific forced voltage swing level (0-3) */
++		device_property_read_u32(dev, "swing-level", &mtk_dp->swing_level);
++		if (mtk_dp->swing_level > DP_TRAIN_VOLTAGE_SWING_LEVEL_3) {
++			dev_warn(dev, "Ignoring invalid swing-level %u\n",
++				 mtk_dp->swing_level);
++			mtk_dp->swing_level = 0;
++		}
++	}
++
+ 	endpoint = of_graph_get_endpoint_by_regs(pdev->dev.of_node, 1, -1);
+ 	len = of_property_count_elems_of_size(endpoint,
+ 					      "data-lanes", sizeof(u32));
+@@ -2441,8 +2724,15 @@ static void mtk_dp_bridge_atomic_disable(struct drm_bridge *bridge,
+ 	mtk_dp_video_enable(mtk_dp, false);
+ 	mtk_dp_audio_mute(mtk_dp, true);
+ 
+-	/* SDP path reset sw*/
+-	mtk_dp_sdp_path_reset(mtk_dp);
++	if (mtk_dp->data->edp_ver) {
++		/* Drop the PHY to bias-only power, keeping the AUX alive */
++		mtk_edp_phy_pwr_state_override(mtk_dp,
++					       PHY_PWR_STATE_BIAS_POWER_ON,
++					       true);
++	} else {
++		/* SDP path reset sw*/
++		mtk_dp_sdp_path_reset(mtk_dp);
++	}
+ 
+ 	/* Ensure the sink is muted */
+ 	msleep(20);
+@@ -2692,14 +2982,17 @@ static int mtk_dp_register_audio_driver(struct device *dev)
+ static int mtk_dp_register_phy(struct mtk_dp *mtk_dp)
+ {
+ 	struct device *dev = mtk_dp->dev;
++	const char *phy_dev_name = mtk_dp->data->phy_dev_name ?: "mediatek-dp-phy";
++	/* The new eDP PHY has its own register range, older ones share ours */
++	struct regmap *phy_regmap = mtk_dp->phy_regs ?: mtk_dp->regs;
+ 
+-	mtk_dp->phy_dev = platform_device_register_data(dev, "mediatek-dp-phy",
++	mtk_dp->phy_dev = platform_device_register_data(dev, phy_dev_name,
+ 							PLATFORM_DEVID_AUTO,
+-							&mtk_dp->regs,
++							&phy_regmap,
+ 							sizeof(struct regmap *));
+ 	if (IS_ERR(mtk_dp->phy_dev))
+ 		return dev_err_probe(dev, PTR_ERR(mtk_dp->phy_dev),
+-				     "Failed to create device mediatek-dp-phy\n");
++				     "Failed to create device %s\n", phy_dev_name);
+ 
+ 	mtk_dp_get_calibration_data(mtk_dp);
+ 
+@@ -2740,6 +3033,11 @@ static int mtk_dp_edp_link_panel(struct drm_dp_aux *mtk_aux)
+ 	return 0;
+ }
+ 
++static void mtk_dp_pm_runtime_put(void *data)
++{
++	pm_runtime_put_sync(data);
++}
++
+ static int mtk_dp_probe(struct platform_device *pdev)
+ {
+ 	struct mtk_dp *mtk_dp;
+@@ -2792,6 +3090,29 @@ static int mtk_dp_probe(struct platform_device *pdev)
+ 	mtk_dp->aux.wait_hpd_asserted = mtk_dp_wait_hpd_asserted;
+ 	drm_dp_aux_init(&mtk_dp->aux);
+ 
++	if (mtk_dp->data->edp_ver) {
++		/*
++		 * The eDP TX v2 needs its power domain and "power" clock up
++		 * before any register access, which happens below already.
++		 */
++		mtk_dp->power_clk = devm_clk_get_optional_enabled(dev, NULL);
++		if (IS_ERR(mtk_dp->power_clk))
++			return dev_err_probe(dev, PTR_ERR(mtk_dp->power_clk),
++					     "Failed to get power clock\n");
++
++		ret = devm_pm_runtime_enable(dev);
++		if (ret)
++			return ret;
++
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return dev_err_probe(dev, ret, "Failed to resume\n");
++
++		ret = devm_add_action_or_reset(dev, mtk_dp_pm_runtime_put, dev);
++		if (ret)
++			return ret;
++	}
++
+ 	platform_set_drvdata(pdev, mtk_dp);
+ 
+ 	if (mtk_dp->data->audio_supported) {
+@@ -2816,9 +3137,16 @@ static int mtk_dp_probe(struct platform_device *pdev)
+ 		 * properly close the eDP port to avoid stalls and then
+ 		 * reinitialize, reset and power on the AUX block.
+ 		 */
+-		mtk_dp_set_idle_pattern(mtk_dp, true);
+-		mtk_dp_initialize_aux_settings(mtk_dp);
+-		mtk_dp_power_enable(mtk_dp);
++		if (mtk_dp->data->edp_ver) {
++			/* eDP TX v2 needs the PHY and full port init for AUX */
++			ret = mtk_dp_poweron(mtk_dp);
++			if (ret)
++				return ret;
++		} else {
++			mtk_dp_set_idle_pattern(mtk_dp, true);
++			mtk_dp_initialize_aux_settings(mtk_dp);
++			mtk_dp_power_enable(mtk_dp);
++		}
+ 
+ 		/* Disable HW interrupts: we don't need any for eDP */
+ 		mtk_dp_hwirq_enable(mtk_dp, false);
+@@ -2856,8 +3184,10 @@ static int mtk_dp_probe(struct platform_device *pdev)
+ 			return dev_err_probe(dev, ret, "Failed to add bridge\n");
+ 	}
+ 
+-	pm_runtime_enable(dev);
+-	pm_runtime_get_sync(dev);
++	if (!mtk_dp->data->edp_ver) {
++		pm_runtime_enable(dev);
++		pm_runtime_get_sync(dev);
++	}
+ 
+ 	return 0;
+ }
+@@ -2866,8 +3196,11 @@ static void mtk_dp_remove(struct platform_device *pdev)
+ {
+ 	struct mtk_dp *mtk_dp = platform_get_drvdata(pdev);
+ 
+-	pm_runtime_put(&pdev->dev);
+-	pm_runtime_disable(&pdev->dev);
++	/* eDP TX v2 uses devm managed runtime PM */
++	if (!mtk_dp->data->edp_ver) {
++		pm_runtime_put(&pdev->dev);
++		pm_runtime_disable(&pdev->dev);
++	}
+ 	if (mtk_dp->data->bridge_type != DRM_MODE_CONNECTOR_eDP)
+ 		timer_delete_sync(&mtk_dp->debounce_timer);
+ 	platform_device_unregister(mtk_dp->phy_dev);
+@@ -2883,6 +3216,7 @@ static int mtk_dp_suspend(struct device *dev)
+ 	mtk_dp_power_disable(mtk_dp);
+ 	if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
+ 		mtk_dp_hwirq_enable(mtk_dp, false);
++	clk_disable_unprepare(mtk_dp->power_clk);
+ 	pm_runtime_put_sync(dev);
+ 
+ 	return 0;
+@@ -2891,8 +3225,14 @@ static int mtk_dp_suspend(struct device *dev)
+ static int mtk_dp_resume(struct device *dev)
+ {
+ 	struct mtk_dp *mtk_dp = dev_get_drvdata(dev);
++	int ret;
+ 
+ 	pm_runtime_get_sync(dev);
++	ret = clk_prepare_enable(mtk_dp->power_clk);
++	if (ret) {
++		dev_err(dev, "Failed to enable power clock: %d\n", ret);
++		return ret;
++	}
+ 	mtk_dp_init_port(mtk_dp);
+ 	if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
+ 		mtk_dp_hwirq_enable(mtk_dp, true);
+@@ -2913,6 +3253,16 @@ static const struct mtk_dp_data mt8188_dp_data = {
+ 	.audio_m_div2_bit = MT8188_AUDIO_M_CODE_MULT_DIV_SEL_DP_ENC0_P0_DIV_2,
+ };
+ 
++static const struct mtk_dp_data mt8189_edp_data = {
++	.bridge_type = DRM_MODE_CONNECTOR_eDP,
++	.smc_cmd = MTK_DP_SIP_ATF_EDP_VIDEO_UNMUTE,
++	.efuse_fmt = mt8195_edp_efuse_fmt,
++	.audio_supported = false,
++	.audio_m_div2_bit = MT8195_AUDIO_M_CODE_MULT_DIV_SEL_DP_ENC0_P0_DIV_2,
++	.edp_ver = MTK_EDP_VER_MT8189,
++	.phy_dev_name = "mediatek-mt8189-edp-phy",
++};
++
+ static const struct mtk_dp_data mt8195_edp_data = {
+ 	.bridge_type = DRM_MODE_CONNECTOR_eDP,
+ 	.smc_cmd = MTK_DP_SIP_ATF_EDP_VIDEO_UNMUTE,
+@@ -2938,6 +3288,10 @@ static const struct of_device_id mtk_dp_of_match[] = {
+ 		.compatible = "mediatek,mt8188-dp-tx",
+ 		.data = &mt8188_dp_data,
+ 	},
++	{
++		.compatible = "mediatek,mt8189-edp-tx",
++		.data = &mt8189_edp_data,
++	},
+ 	{
+ 		.compatible = "mediatek,mt8195-edp-tx",
+ 		.data = &mt8195_edp_data,
+@@ -2967,4 +3321,4 @@ MODULE_AUTHOR("Markus Schneider-Pargmann <msp@baylibre.com>");
+ MODULE_AUTHOR("Bo-Chen Chen <rex-bc.chen@mediatek.com>");
+ MODULE_DESCRIPTION("MediaTek DisplayPort Driver");
+ MODULE_LICENSE("GPL");
+-MODULE_SOFTDEP("pre: phy_mtk_dp");
++MODULE_SOFTDEP("pre: phy_mtk_dp phy_mtk_edp");
+diff --git a/drivers/gpu/drm/mediatek/mtk_dp_reg.h b/drivers/gpu/drm/mediatek/mtk_dp_reg.h
+index 8ad7a9cc2..f72c83012 100644
+--- a/drivers/gpu/drm/mediatek/mtk_dp_reg.h
++++ b/drivers/gpu/drm/mediatek/mtk_dp_reg.h
+@@ -46,11 +46,23 @@
+ #define DP_PHY_LANE_TX_3		0x404
+ #define RG_XTP_LN3_TX_IMPSEL_PMOS		GENMASK(15, 12)
+ #define RG_XTP_LN3_TX_IMPSEL_NMOS		GENMASK(19, 16)
++#define RG_DSI_DEM_EN			0x500
++#define DSI_DE_EMPHASIS_ENABLE			BIT(1)
+ #define MTK_DP_1040			0x1040
+ #define RG_DPAUX_RX_VALID_DEGLITCH_EN		BIT(2)
+ #define RG_XTP_GLB_CKDET_EN			BIT(1)
+ #define RG_DPAUX_RX_EN				BIT(0)
+ 
++/* eDP TX v2 (MT8189): offsets in the separate PHY register range */
++#define MTK_EDP_PHYD_DIG_GLB_STATUS_0	0x146c
++#define RGS_BG_CORE_EN_READY			BIT(0)
++#define RGS_AUX_LDO_EN_READY			BIT(1)
++#define MTK_EDP_PHYD_DRV_FORCE_LANE(lane)	(0x1018 + 0x100 * (lane))
++#define EDP_TX_LN_VOLT_SWING_EN			BIT(0)
++#define EDP_TX_LN_VOLT_SWING_VAL_MASK		GENMASK(2, 1)
++#define EDP_TX_LN_PRE_EMPH_EN			BIT(4)
++#define EDP_TX_LN_PRE_EMPH_VAL_MASK		GENMASK(6, 5)
++
+ /* offset: TOP_OFFSET (0x2000) */
+ #define MTK_DP_TOP_PWR_STATE		0x2000
+ #define DP_PWR_STATE_MASK			GENMASK(1, 0)
+@@ -70,12 +82,20 @@
+ #define DP_TX3_VOLT_SWING_MASK			GENMASK(25, 24)
+ #define DP_TX3_PRE_EMPH_MASK			GENMASK(27, 26)
+ #define MTK_DP_TOP_RESET_AND_PROBE	0x2020
++#define RG_SW_RST_MASK				GENMASK(7, 0)
+ #define SW_RST_B_PHYD				BIT(4)
++#define RG_PROBE_LOW_SEL_MASK			GENMASK(18, 16)
++#define RG_PROBE_LOW_SEL			BIT(16)
++#define RG_PROBE_LOW_HIGH_SWAP			BIT(23)
+ #define MTK_DP_TOP_IRQ_MASK		0x202c
++#define ENCODER_IRQ_MSK				BIT(0)
++#define TRANS_IRQ_MSK				BIT(1)
+ #define IRQ_MASK_AUX_TOP_IRQ			BIT(2)
+ #define MTK_DP_TOP_MEM_PD		0x2038
+ #define MEM_ISO_EN				BIT(0)
+ #define FUSE_SEL				BIT(2)
++#define MTK_EDP_TOP_CLKGEN_0		0x2074
++#define EDP_TX_TOP_CLKGEN_RST_MASK		GENMASK(3, 0)
+ 
+ /* offset: ENC0_OFFSET (0x3000) */
+ #define MTK_DP_ENC0_P0_3000			0x3000
+@@ -83,6 +103,8 @@
+ #define VIDEO_MUTE_SW_DP_ENC0_P0			BIT(2)
+ #define VIDEO_MUTE_SEL_DP_ENC0_P0			BIT(3)
+ #define ENHANCED_FRAME_EN_DP_ENC0_P0			BIT(4)
++#define DP_I_MODE_ENABLE_DP_ENC0_P0			BIT(6)
++#define BS_SYMBOL_CNT_RESET_DP_ENC0_P0			BIT(7)
+ #define MTK_DP_ENC0_P0_3004			0x3004
+ #define VIDEO_M_CODE_SEL_DP_ENC0_P0_MASK		BIT(8)
+ #define DP_TX_ENCODER_4P_RESET_SW_DP_ENC0_P0		BIT(9)
+@@ -123,6 +145,7 @@
+ #define VIDEO_SOURCE_SEL_DP_ENC0_P0_MASK		BIT(11)
+ #define MTK_DP_ENC0_P0_303C			0x303c
+ #define SRAM_START_READ_THRD_DP_ENC0_P0_MASK		GENMASK(5, 0)
++#define SRAM_START_READ_THRD_DP_ENC0_P0_EDP_VAL		0x8
+ #define VIDEO_COLOR_DEPTH_DP_ENC0_P0_MASK		GENMASK(10, 8)
+ #define VIDEO_COLOR_DEPTH_DP_ENC0_P0_16BIT		(0 << 8)
+ #define VIDEO_COLOR_DEPTH_DP_ENC0_P0_12BIT		(1 << 8)
+@@ -226,6 +249,7 @@
+ #define FIFO_READ_START_POINT_DP_ENC1_P0_MASK		GENMASK(15, 12)
+ #define MTK_DP_ENC1_P0_3368			0x3368
+ #define VIDEO_SRAM_FIFO_CNT_RESET_SEL_DP_ENC1_P0	BIT(0)
++#define VIDEO_SRAM_FIFO_CNT_RESET_SEL_DP_ENC1_P0_MASK	GENMASK(1, 0)
+ #define VIDEO_STABLE_CNT_THRD_DP_ENC1_P0		BIT(4)
+ #define SDP_DP13_EN_DP_ENC1_P0				BIT(8)
+ #define BS2BS_MODE_DP_ENC1_P0				BIT(12)
+@@ -235,11 +259,18 @@
+ 							 VIDEO_STABLE_CNT_THRD_DP_ENC1_P0 | \
+ 							 SDP_DP13_EN_DP_ENC1_P0 | \
+ 							 BS2BS_MODE_DP_ENC1_P0)
++#define BS_FOLLOW_SEL_DP_ENC1_P0			BIT(15)
+ 
+ #define MTK_DP_ENC1_P0_3374			0x3374
+ #define SDP_ASP_INSERT_IN_HBLANK_DP_ENC1_P0_MASK	BIT(12)
+ #define SDP_DOWN_ASP_CNT_INIT_DP_ENC1_P0_MASK		GENMASK(11, 0)
+ 
++#define MTK_DP_ENC1_P0_33C0			0x33c0
++#define SDP_TESTBUS_SEL_BIT4_DP_ENC1_P0			BIT(7)
++#define SDP_TESTBUS_SEL_DP_ENC1_P0_MASK			GENMASK(15, 12)
++#define MTK_DP_ENC1_P0_33C4			0x33c4
++#define DP_TX_ENCODER_TESTBUS_SEL_DP_ENC1_P0_MASK	GENMASK(6, 5)
++#define DP_TX_ENCODER_TESTBUS_SEL_DP_ENC1_P0		BIT(5)
+ #define MTK_DP_ENC1_P0_33F4			0x33f4
+ #define DP_ENC_DUMMY_RW_1_AUDIO_RST_EN			BIT(0)
+ #define DP_ENC_DUMMY_RW_1				BIT(9)
+@@ -302,6 +333,7 @@
+ #define MTK_DP_AUX_P0_3614			0x3614
+ #define AUX_RX_UI_CNT_THR_AUX_TX_P0_MASK		GENMASK(6, 0)
+ #define AUX_RX_UI_CNT_THR_AUX_FOR_26M			13
++#define AUX_RX_UI_CNT_THR_AUX_FOR_26M_EDP_V2		14
+ #define MTK_DP_AUX_P0_3618			0x3618
+ #define AUX_RX_FIFO_FULL_AUX_TX_P0_MASK			BIT(9)
+ #define AUX_RX_FIFO_WRITE_POINTER_AUX_TX_P0_MASK	GENMASK(3, 0)
+@@ -344,19 +376,64 @@
+ #define MCU_REQUEST_ADDRESS_LSB_AUX_TX_P0_MASK		GENMASK(15, 0)
+ #define MTK_DP_AUX_P0_364C			0x364c
+ #define MCU_REQUEST_ADDRESS_MSB_AUX_TX_P0_MASK		GENMASK(3, 0)
++#define HPD_INT_THD_AUX_TX_P0_MASK			GENMASK(9, 4)
++#define HPD_INT_THD_AUX_TX_P0_VAL			0x32
++#define HPD_STATUS_AUX_TX_P0				BIT(15)
+ #define MTK_DP_AUX_P0_3650			0x3650
+ #define MCU_REQ_DATA_NUM_AUX_TX_P0_MASK			GENMASK(15, 12)
+ #define PHY_FIFO_RST_AUX_TX_P0_MASK			BIT(9)
+ #define MCU_ACK_TRAN_COMPLETE_AUX_TX_P0			BIT(8)
+ #define MTK_DP_AUX_P0_3658			0x3658
+ #define AUX_TX_OV_EN_AUX_TX_P0_MASK			BIT(0)
++#define MTK_DP_AUX_P0_3660			0x3660
++#define DP_TX_INT_MASK_AUX_TX_P0_MASK			GENMASK(15, 0)
++#define HPD_DISCONNECT_EVENT_AUX_TX_P0			BIT(10)
++#define HPD_INTERRUPT_EVENT_AUX_TX_P0			BIT(2)
++#define HPD_CONNECT_EVENT_AUX_TX_P0			BIT(0)
++#define MTK_DP_AUX_P0_366C			0x366c
++#define XTAL_FREQ_DP_TX_AUX_366C_MASK			GENMASK(15, 8)
++#define XTAL_FREQ_DP_TX_AUX_366C_VAL			0x68
++#define MTK_DP_AUX_P0_367C			0x367c
++#define HPD_CONN_THD_AUX_TX_P0_MASK			GENMASK(9, 6)
+ #define MTK_DP_AUX_P0_3690			0x3690
+ #define RX_REPLY_COMPLETE_MODE_AUX_TX_P0		BIT(8)
++#define MTK_DP_AUX_P0_36A0			0x36a0
++#define DP_TX_INIT_MASK_15_TO_2_AUX_TX_P0		GENMASK(15, 2)
+ #define MTK_DP_AUX_P0_3704			0x3704
+ #define AUX_TX_FIFO_WDATA_NEW_MODE_T_AUX_TX_P0_MASK	BIT(1)
+ #define AUX_TX_FIFO_NEW_MODE_EN_AUX_TX_P0		BIT(2)
+ #define MTK_DP_AUX_P0_3708			0x3708
++#define MTK_DP_AUX_P0_37A0			0x37a0
++#define HPD_DISC_THD_AUX_TX_P0_MASK			GENMASK(7, 4)
+ #define MTK_DP_AUX_P0_37C8			0x37c8
+ #define MTK_ATOP_EN_AUX_TX_P0				BIT(0)
+ 
++/* offset: ENC_P0_3 (0x3f00), eDP TX v2 (MT8189) only */
++#define MTK_DP_ENC_P0_3_3F04			0x3f04
++#define FRAME_START_MARKER_0_DP_ENC_P0_3_MASK		GENMASK(15, 0)
++#define MTK_DP_ENC_P0_3_3F08			0x3f08
++#define FRAME_START_MARKER_1_DP_ENC_P0_3		BIT(3)
++#define MTK_DP_ENC_P0_3_3F0C			0x3f0c
++#define FRAME_END_MARKER_0_DP_ENC_P0_3			BIT(1)
++#define MTK_DP_ENC_P0_3_3F10			0x3f10
++#define FRAME_END_MARKER_1_DP_ENC_P0_3			BIT(3)
++#define MTK_DP_ENC_P0_3_3F28			0x3f28
++#define DP_TX_SDP_PSR_AS_TESTBUS_MASK			GENMASK(5, 2)
++#define DP_TX_SDP_PSR_AS_TESTBUS			(0xa << 2)
++#define MTK_DP_ENC_P0_3_3F44			0x3f44
++#define PHY_PWR_STATE_OW_EN_DP_ENC_P0_3			BIT(2)
++#define PHY_PWR_STATE_OW_VALUE_DP_ENC_P0_3_MASK		GENMASK(4, 3)
++#define PHY_PWR_STATE_ALL_POWER_OFF			(0x0 << 3)
++#define PHY_PWR_STATE_BIAS_POWER_ON			(0x1 << 3)
++#define PHY_PWR_STATE_BIAS_AND_PLL_POWER_ON		(0x2 << 3)
++#define PHY_PWR_STATE_ALL_POWER_ON			(0x3 << 3)
++#define MTK_DP_ENC_P0_3_3F80			0x3f80
++#define PSR_PATGEN_AVT_EN_DP_ENC_P0_3			BIT(5)
++#define MTK_DP_ENC_P0_3_3FF8			0x3ff8
++#define PHY_STATE_RESET_ALL_DP_ENC_P0_3_MASK		GENMASK(7, 0)
++#define DVO_ON_W_1_DP_ENC_P0_3				BIT(5)
++#define PHY_STATE_W_1_DP_ENC_P0_3			BIT(6)
++#define XTAL_FREQ_FOR_PSR_DP_ENC_P0_3_MASK		GENMASK(13, 9)
++#define XTAL_FREQ_FOR_PSR_DP_ENC_P0_3_VAL		25
++
+ #endif /*_MTK_DP_REG_H_*/
+diff --git a/drivers/gpu/drm/mediatek/mtk_drm_drv.c b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+index dc8e3e917..6f25dc206 100644
+--- a/drivers/gpu/drm/mediatek/mtk_drm_drv.c
++++ b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+@@ -188,6 +188,21 @@ static const unsigned int mt8188_mtk_ddp_main[] = {
+ 	DDP_COMPONENT_DITHER0,
+ };
+ 
++/* MT8189: the internal eDP panel hangs off DVO0 (ChromeOS adds the colour blocks between RDMA0 and the crossbar) */
++static const unsigned int mt8189_mtk_ddp_main[] = {
++	DDP_COMPONENT_OVL0,
++	DDP_COMPONENT_RDMA0,
++	DDP_COMPONENT_COMP0_OUT_CB4,
++	DDP_COMPONENT_DVO0,
++};
++
++static const unsigned int mt8189_mtk_ddp_ext[] = {
++	DDP_COMPONENT_OVL1,
++	DDP_COMPONENT_RDMA1,
++	DDP_COMPONENT_COMP0_OUT_CB5,
++};
++
++
+ static const struct mtk_drm_route mt8188_mtk_ddp_main_routes[] = {
+ 	{0, DDP_COMPONENT_DP_INTF0},
+ 	{0, DDP_COMPONENT_DSI0},
+@@ -300,6 +315,17 @@ static const struct mtk_mmsys_driver_data mt8188_vdosys0_driver_data = {
+ 	.min_height = 1,
+ };
+ 
++static const struct mtk_mmsys_driver_data mt8189_mmsys_driver_data = {
++	.main_path = mt8189_mtk_ddp_main,
++	.main_len = ARRAY_SIZE(mt8189_mtk_ddp_main),
++	.mmsys_dev_num = 1,
++	.ext_path = mt8189_mtk_ddp_ext,
++	.ext_len = ARRAY_SIZE(mt8189_mtk_ddp_ext),
++	.max_width = 8191,
++	.min_width = 1,
++	.min_height = 1,
++};
++
+ static const struct mtk_mmsys_driver_data mt8192_mmsys_driver_data = {
+ 	.main_path = mt8192_mtk_ddp_main,
+ 	.main_len = ARRAY_SIZE(mt8192_mtk_ddp_main),
+@@ -350,6 +376,8 @@ static const struct of_device_id mtk_drm_of_ids[] = {
+ 	  .data = &mt8188_vdosys0_driver_data},
+ 	{ .compatible = "mediatek,mt8188-vdosys1",
+ 	  .data = &mt8195_vdosys1_driver_data},
++	{ .compatible = "mediatek,mt8189-mmsys",
++	  .data = &mt8189_mmsys_driver_data},
+ 	{ .compatible = "mediatek,mt8192-mmsys",
+ 	  .data = &mt8192_mmsys_driver_data},
+ 	{ .compatible = "mediatek,mt8195-mmsys",
+@@ -754,6 +782,8 @@ static const struct of_device_id mtk_ddp_comp_dt_ids[] = {
+ 	  .data = (void *)MTK_DISP_MUTEX },
+ 	{ .compatible = "mediatek,mt8188-disp-mutex",
+ 	  .data = (void *)MTK_DISP_MUTEX },
++	{ .compatible = "mediatek,mt8189-disp-mutex",
++	  .data = (void *)MTK_DISP_MUTEX},
+ 	{ .compatible = "mediatek,mt8192-disp-mutex",
+ 	  .data = (void *)MTK_DISP_MUTEX },
+ 	{ .compatible = "mediatek,mt8195-disp-mutex",
+@@ -770,6 +800,8 @@ static const struct of_device_id mtk_ddp_comp_dt_ids[] = {
+ 	  .data = (void *)MTK_DISP_OVL },
+ 	{ .compatible = "mediatek,mt8183-disp-ovl",
+ 	  .data = (void *)MTK_DISP_OVL },
++	{ .compatible = "mediatek,mt8189-disp-ovl",
++	  .data = (void *)MTK_DISP_OVL},
+ 	{ .compatible = "mediatek,mt8192-disp-ovl",
+ 	  .data = (void *)MTK_DISP_OVL },
+ 	{ .compatible = "mediatek,mt8195-disp-ovl",
+@@ -794,6 +826,8 @@ static const struct of_device_id mtk_ddp_comp_dt_ids[] = {
+ 	  .data = (void *)MTK_DISP_RDMA },
+ 	{ .compatible = "mediatek,mt8183-disp-rdma",
+ 	  .data = (void *)MTK_DISP_RDMA },
++	{ .compatible = "mediatek,mt8189-disp-rdma",
++	  .data = (void *)MTK_DISP_RDMA },
+ 	{ .compatible = "mediatek,mt8195-disp-rdma",
+ 	  .data = (void *)MTK_DISP_RDMA },
+ 	{ .compatible = "mediatek,mt8173-disp-ufoe",
+@@ -828,6 +862,10 @@ static const struct of_device_id mtk_ddp_comp_dt_ids[] = {
+ 	  .data = (void *)MTK_DSI },
+ 	{ .compatible = "mediatek,mt8188-dsi",
+ 	  .data = (void *)MTK_DSI },
++	{ .compatible = "mediatek,mt8189-dsi",
++	  .data = (void *)MTK_DSI },
++	{ .compatible = "mediatek,mt8189-edp-dvo",
++	  .data = (void *)MTK_DVO },
+ 	{ }
+ };
+ 
+@@ -980,6 +1018,8 @@ static int mtk_drm_of_ddp_path_build_one(struct device *dev, enum mtk_crtc_path
+ 	case DDP_COMPONENT_DSI1:
+ 	case DDP_COMPONENT_DSI2:
+ 	case DDP_COMPONENT_DSI3:
++	case DDP_COMPONENT_DVO0:
++	case DDP_COMPONENT_DVO1:
+ 		break;
+ 	default:
+ 		dev_err(dev, "Invalid display hw pipeline. Last component: %d (ret=%d)\n",
+@@ -1177,7 +1217,8 @@ static int mtk_drm_probe(struct platform_device *pdev)
+ 		    comp_type == MTK_DISP_RDMA ||
+ 		    comp_type == MTK_DP_INTF ||
+ 		    comp_type == MTK_DPI ||
+-		    comp_type == MTK_DSI) {
++		    comp_type == MTK_DSI ||
++		    comp_type == MTK_DVO) {
+ 			dev_info(dev, "Adding component match for %pOF\n",
+ 				 node);
+ 			drm_of_component_match_add(dev, &match, component_compare_of,
+@@ -1291,6 +1332,7 @@ static struct platform_driver * const mtk_drm_drivers[] = {
+ 	&mtk_disp_ovl_driver,
+ 	&mtk_disp_rdma_driver,
+ 	&mtk_dpi_driver,
++	&mtk_dvo_driver,
+ 	&mtk_drm_platform_driver,
+ 	&mtk_dsi_driver,
+ 	&mtk_ethdr_driver,
+diff --git a/drivers/gpu/drm/mediatek/mtk_drm_drv.h b/drivers/gpu/drm/mediatek/mtk_drm_drv.h
+index d48da019a..b1703081c 100644
+--- a/drivers/gpu/drm/mediatek/mtk_drm_drv.h
++++ b/drivers/gpu/drm/mediatek/mtk_drm_drv.h
+@@ -77,6 +77,7 @@ extern struct platform_driver mtk_disp_ovl_adaptor_driver;
+ extern struct platform_driver mtk_disp_ovl_driver;
+ extern struct platform_driver mtk_disp_rdma_driver;
+ extern struct platform_driver mtk_dpi_driver;
++extern struct platform_driver mtk_dvo_driver;
+ extern struct platform_driver mtk_dsi_driver;
+ extern struct platform_driver mtk_ethdr_driver;
+ extern struct platform_driver mtk_mdp_rdma_driver;
+diff --git a/drivers/gpu/drm/mediatek/mtk_dvo.c b/drivers/gpu/drm/mediatek/mtk_dvo.c
+new file mode 100644
+index 000000000..55289a762
+--- /dev/null
++++ b/drivers/gpu/drm/mediatek/mtk_dvo.c
+@@ -0,0 +1,927 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2014 MediaTek Inc.
++ * Author: Jie Qiu <jie.qiu@mediatek.com>
++ *
++ * Ported from the ChromeOS chromeos-6.6 kernel tree (drivers/gpu/drm/mediatek/
++ * mtk_dvo.c) to the current DRM bridge API. Only the MT8189 internal eDP DVO
++ * is supported; the ChromeOS-only seamless refresh rate switch, the MMQoS HRT
++ * bandwidth hook and the external DP (MST) DVO variant were dropped.
++ */
++
++#include <linux/clk.h>
++#include <linux/component.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/math64.h>
++#include <linux/media-bus-format.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/soc/mediatek/mtk-mmsys.h>
++#include <linux/types.h>
++
++#include <video/videomode.h>
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_bridge.h>
++#include <drm/drm_bridge_connector.h>
++#include <drm/drm_crtc.h>
++#include <drm/drm_encoder.h>
++#include <drm/drm_of.h>
++#include <drm/drm_print.h>
++
++#include "mtk_ddp_comp.h"
++#include "mtk_disp_drv.h"
++#include "mtk_drm_drv.h"
++#include "mtk_dvo_regs.h"
++
++/* DVO INPUT default value is 1T2P */
++#define MTK_DVO_INPUT_MODE				2
++/* DVO OUTPUT value is 1T4P*/
++#define MTK_DVO_OUTPUT_MODE				4
++/* 1 unit = 2 group data = 2 * 1T4P = 8P */
++#define MTK_DISP_BUF_SRAM_UNIT_SIZE			8
++#define MTK_DISP_LINE_BUF_DVO_US			40
++#define MTK_DVO_EDP_MAX_CLK				297
++#define MTK_DVO_MAX_HACTIVE				3840
++#define TWAKE_UP					5
++#define PREULTRA_HIGH_US				26
++#define PREULTRA_LOW_US					25
++#define ULTRA_HIGH_US					25
++#define ULTRA_LOW_US					23
++#define URGENT_HIGH_US					12
++#define URGENT_LOW_US					11
++/* Delay DVO SoF to extend RDMA prepare time */
++#define INT_SOF_DLY					0x0000000F
++
++enum mtk_dvo_out_bit_num {
++	MTK_DVO_OUT_BIT_NUM_8BITS,
++	MTK_DVO_OUT_BIT_NUM_10BITS,
++	MTK_DVO_OUT_BIT_NUM_12BITS,
++	MTK_DVO_OUT_BIT_NUM_16BITS
++};
++
++enum mtk_dvo_out_yc_map {
++	MTK_DVO_OUT_YC_MAP_RGB,
++	MTK_DVO_OUT_YC_MAP_CYCY,
++	MTK_DVO_OUT_YC_MAP_YCYC,
++	MTK_DVO_OUT_YC_MAP_CY,
++	MTK_DVO_OUT_YC_MAP_YC
++};
++
++enum mtk_dvo_out_channel_swap {
++	MTK_DVO_OUT_CHANNEL_SWAP_RGB,
++	MTK_DVO_OUT_CHANNEL_SWAP_GBR,
++	MTK_DVO_OUT_CHANNEL_SWAP_BRG,
++	MTK_DVO_OUT_CHANNEL_SWAP_RBG,
++	MTK_DVO_OUT_CHANNEL_SWAP_GRB,
++	MTK_DVO_OUT_CHANNEL_SWAP_BGR
++};
++
++enum mtk_dvo_out_color_format {
++	MTK_DVO_COLOR_FORMAT_RGB,
++	MTK_DVO_COLOR_FORMAT_YCBCR_422
++};
++
++enum mtk_dvo_golden_setting_level {
++	MTK_DVO_FHD_60FPS_1920 = 0,
++	MTK_DVO_FHD_60FPS_2180,
++	MTK_DVO_FHD_60FPS_2400,
++	MTK_DVO_FHD_60FPS_2520,
++	MTK_DVO_FHD_90FPS,
++	MTK_DVO_FHD_120FPS,
++	MTK_DVO_WQHD_60FPS,
++	MTK_DVO_WQHD_120FPS,
++	MTK_DVO_8K_30FPS,
++	MTK_DVO_GSL_MAX,
++};
++
++struct mtk_dvo_gs_info {
++	u32 dvo_buf_sodi_high;
++	u32 dvo_buf_sodi_low;
++};
++
++struct mtk_dvo {
++	struct drm_encoder encoder;
++	struct drm_bridge bridge;
++	struct drm_bridge *next_bridge;
++	struct drm_connector *connector;
++	void __iomem *regs;
++	struct device *dev;
++	struct device *mmsys_dev;
++	struct clk *engine_clk;
++	struct clk *pixel_clk;
++	struct clk *tvd_clk;
++	struct clk *hf_fdvo_clk;
++	int irq;
++	struct drm_display_mode mode;
++	const struct mtk_dvo_conf *conf;
++	enum mtk_dvo_out_color_format color_format;
++	enum mtk_dvo_out_yc_map yc_map;
++	enum mtk_dvo_out_bit_num bit_num;
++	enum mtk_dvo_out_channel_swap channel_swap;
++	u32 output_fmt;
++	int refcount;
++	enum mtk_dvo_golden_setting_level gs_level;
++};
++
++static inline struct mtk_dvo *bridge_to_dvo(struct drm_bridge *b)
++{
++	return container_of(b, struct mtk_dvo, bridge);
++}
++
++struct mtk_dvo_sync_param {
++	u32 sync_width;
++	u32 front_porch;
++	u32 back_porch;
++	bool shift_half_line;
++};
++
++/**
++ * struct mtk_dvo_conf - Configuration of mediatek dvo.
++ * @cal_factor: Callback function to calculate the TVDPLL/pixel clock factor.
++ * @max_clock_khz: Max clock frequency supported for this SoC in kHz units.
++ * @output_fmts: Array of supported output formats.
++ * @num_output_fmts: Quantity of supported output formats.
++ * @out_np_sel: Value of the OUT_NP_SEL field (output pixels per clock).
++ * @dimension_mask: Mask used for HWIDTH, HPORCH, VSYNC_WIDTH and VSYNC_PORCH
++ *		    (no shift).
++ * @hvsize_mask: Mask of HSIZE and VSIZE mask (no shift).
++ * @pixels_per_iter: Quantity of transferred pixels per iteration.
++ * @irq_en: Register irq handler and enable irq.
++ */
++struct mtk_dvo_conf {
++	unsigned int (*cal_factor)(int clock);
++	u32 max_clock_khz;
++	const u32 *output_fmts;
++	u32 num_output_fmts;
++	u32 out_np_sel;
++	u32 dimension_mask;
++	u32 hvsize_mask;
++	u32 pixels_per_iter;
++	bool irq_en;
++};
++
++static const struct mtk_dvo_gs_info mtk_dvo_gs[MTK_DVO_GSL_MAX] = {
++	[MTK_DVO_FHD_60FPS_1920] = {6880, 511},
++	[MTK_DVO_8K_30FPS] = {5255, 3899},
++};
++
++static void mtk_dvo_mask(struct mtk_dvo *dvo, u32 offset, u32 val, u32 mask)
++{
++	u32 tmp = readl(dvo->regs + offset) & ~mask;
++
++	tmp |= (val & mask);
++	writel(tmp, dvo->regs + offset);
++}
++
++static void mtk_dvo_sw_reset(struct mtk_dvo *dvo, bool reset)
++{
++	mtk_dvo_mask(dvo, DVO_RET, reset ? SWRST : 0, SWRST);
++}
++
++static void mtk_dvo_enable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_EN, EN, EN);
++}
++
++static void mtk_dvo_disable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_EN, 0, EN);
++}
++
++static void mtk_dvo_irq_enable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_INTEN, INT_VDE_END_EN | UNDERFLOW_EN,
++		     INT_VDE_END_EN | UNDERFLOW_EN);
++}
++
++static void mtk_dvo_info_queue_start(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_TGEN_INFOQ_LATENCY, 0,
++		     INFOQ_START_LATENCY_MASK | INFOQ_END_LATENCY_MASK);
++}
++
++static void mtk_dvo_buffer_ctrl(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_BUF_CON0, DISP_BUF_EN, DISP_BUF_EN);
++	mtk_dvo_mask(dvo, DVO_BUF_CON0, FIFO_UNDERFLOW_DONE_BLOCK, FIFO_UNDERFLOW_DONE_BLOCK);
++}
++
++static void mtk_dvo_trailing_blank_setting(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_TGEN_V_LAST_TRAILING_BLANK, 0x20, V_LAST_TRAILING_BLANK_MASK);
++	mtk_dvo_mask(dvo, DVO_TGEN_OUTPUT_DELAY_LINE, 0x20, EXT_TG_DLY_LINE_MASK);
++}
++
++static irqreturn_t mtk_dvo_irq_handler(int irq, void *dev_id)
++{
++	struct mtk_dvo *dvo = dev_id;
++	u32 val;
++
++	val = readl(dvo->regs + DVO_INTSTA);
++	if (!val)
++		return IRQ_NONE;
++
++	writel(0x0, dvo->regs + DVO_INTSTA);
++
++	if (val & EXT_VDE_END_STA)
++		dev_dbg(dvo->dev, "frame complete!\n");
++	if (val & INT_UNDERFLOW_STA)
++		dev_err_ratelimited(dvo->dev, "frame underflow!\n");
++
++	return IRQ_HANDLED;
++}
++
++static void mtk_dvo_get_gs_level(struct mtk_dvo *dvo)
++{
++	struct drm_display_mode *mode = &dvo->mode;
++
++	if (mode->hdisplay == 1920 && mode->vdisplay == 1080)
++		dvo->gs_level = MTK_DVO_FHD_60FPS_1920;
++	else
++		dvo->gs_level = MTK_DVO_8K_30FPS;
++}
++
++static void mtk_dvo_sodi_setting(struct mtk_dvo *dvo, struct drm_display_mode *mode)
++{
++	const u64 unit = (u64)8 * 32 * 1000000;
++	u32 mmsys_clk;
++	u64 data_rate;
++	u64 fill_rate_rem = 0, consume_rate_rem = 0;
++	u64 fill_rate, consume_rate;
++	u64 dvo_fifo_size, fifo_size, total_bit;
++	u64 sodi_high_rem, sodi_low_rem, tmp;
++	u64 sodi_high, sodi_low, preultra_high, preultra_low;
++	u64 ultra_high, ultra_low, urgent_high, urgent_low;
++
++	mmsys_clk = mode->clock / 1000;
++	dev_dbg(dvo->dev, "mode->clock = %d\n", mode->clock);
++	if (!mmsys_clk) {
++		dev_dbg(dvo->dev, "mmclk is zero, use default value\n");
++		mmsys_clk = 273;
++	}
++
++	fill_rate = div64_u64_rem((u64)mmsys_clk * MTK_DVO_INPUT_MODE * 30,
++				  (u64)32 * MTK_DISP_BUF_SRAM_UNIT_SIZE, &fill_rate_rem);
++
++	data_rate = (u64)mode->hdisplay * mode->vdisplay *
++		    div64_u64((u64)mode->clock * 1000, ((u64)mode->htotal * mode->vtotal));
++	consume_rate = div64_u64_rem((data_rate * 30 * 5) / 4, unit, &consume_rate_rem);
++
++	total_bit = (u64)MTK_DVO_EDP_MAX_CLK * MTK_DVO_OUTPUT_MODE * 30 *
++		    MTK_DISP_LINE_BUF_DVO_US;
++
++	fifo_size = div64_u64(total_bit, MTK_DISP_BUF_SRAM_UNIT_SIZE * 30);
++
++	/* 3 is dvo supports MSO mode, it adds three more line buffers */
++	dvo_fifo_size = fifo_size +
++			((MTK_DVO_MAX_HACTIVE / MTK_DISP_BUF_SRAM_UNIT_SIZE) * 3);
++
++	/* 1 is to round up */
++	sodi_high_rem = fill_rate_rem * unit;
++	tmp = consume_rate_rem * (32 * MTK_DISP_BUF_SRAM_UNIT_SIZE);
++
++	if (sodi_high_rem < tmp) {
++		u64 total = unit * 32 * MTK_DISP_BUF_SRAM_UNIT_SIZE;
++
++		fill_rate -= 1;
++		sodi_high_rem = div64_u64((total + sodi_high_rem - tmp) * 32 * 6, total);
++	} else {
++		u64 total = unit * 32 * MTK_DISP_BUF_SRAM_UNIT_SIZE;
++
++		sodi_high_rem = div64_u64((sodi_high_rem - tmp) * 32 * 6, total);
++	}
++
++	sodi_high = div64_u64((dvo_fifo_size * 30 * 5) - (32 * 6 * (fill_rate - consume_rate))
++			      - sodi_high_rem + (5 * 32 - 1), 5 * 32);
++	sodi_low_rem = div64_u64(consume_rate_rem * (ULTRA_LOW_US + TWAKE_UP) + unit - 1, unit);
++	sodi_low = consume_rate * (ULTRA_LOW_US + TWAKE_UP) + sodi_low_rem;
++	preultra_high = consume_rate * PREULTRA_HIGH_US +
++			div64_u64(consume_rate_rem * PREULTRA_HIGH_US + unit - 1, unit);
++	preultra_low = consume_rate * PREULTRA_LOW_US +
++		       div64_u64(consume_rate_rem * PREULTRA_LOW_US + unit - 1, unit);
++	ultra_high = consume_rate * ULTRA_HIGH_US +
++		     div64_u64(consume_rate_rem * ULTRA_HIGH_US + unit - 1, unit);
++	ultra_low = consume_rate * ULTRA_LOW_US +
++		    div64_u64(consume_rate_rem * ULTRA_LOW_US + unit - 1, unit);
++	urgent_high = consume_rate * URGENT_HIGH_US +
++		      div64_u64(consume_rate_rem * URGENT_HIGH_US + unit - 1, unit);
++	urgent_low = consume_rate * URGENT_LOW_US +
++		     div64_u64(consume_rate_rem * URGENT_LOW_US + unit - 1, unit);
++
++	mtk_dvo_mask(dvo, DVO_BUF_SODI_HIGHT, sodi_high, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_SODI_LOW, sodi_low, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_PREULTRA_HIGHT, preultra_high, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_PREULTRA_LOW, preultra_low, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_ULTRA_HIGHT, ultra_high, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_ULTRA_LOW, ultra_low, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_URGENT_HIGHT, urgent_high, DVO_DISP_BUF_MASK);
++	mtk_dvo_mask(dvo, DVO_BUF_URGENT_LOW, urgent_low, DVO_DISP_BUF_MASK);
++}
++
++static void mtk_dvo_golden_setting(struct mtk_dvo *dvo)
++{
++	const struct mtk_dvo_gs_info *gs_info;
++
++	if (dvo->gs_level >= MTK_DVO_GSL_MAX) {
++		dev_info(dvo->dev, "%s invalid gs_level %d\n",
++			 __func__, dvo->gs_level);
++		return;
++	}
++
++	gs_info = &mtk_dvo_gs[dvo->gs_level];
++
++	mtk_dvo_mask(dvo, DVO_BUF_SODI_HIGHT, gs_info->dvo_buf_sodi_high, GENMASK(31, 0));
++	mtk_dvo_mask(dvo, DVO_BUF_SODI_LOW, gs_info->dvo_buf_sodi_low, GENMASK(31, 0));
++}
++
++static void mtk_dvo_shadow_ctrl(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_SHADOW_CTRL, 0, BYPASS_SHADOW);
++	mtk_dvo_mask(dvo, DVO_SHADOW_CTRL, FORCE_COMMIT, FORCE_COMMIT);
++}
++
++static void mtk_dvo_config_hsync(struct mtk_dvo *dvo,
++				 struct mtk_dvo_sync_param *sync)
++{
++	mtk_dvo_mask(dvo, DVO_TGEN_H0, sync->sync_width << HSYNC,
++		     dvo->conf->dimension_mask << HSYNC);
++	mtk_dvo_mask(dvo, DVO_TGEN_H0, sync->front_porch << HFP,
++		     dvo->conf->dimension_mask << HFP);
++	mtk_dvo_mask(dvo, DVO_TGEN_H1, (sync->back_porch + sync->sync_width) << HSYNC2ACT,
++		     dvo->conf->dimension_mask << HSYNC2ACT);
++}
++
++static void mtk_dvo_config_vsync(struct mtk_dvo *dvo,
++				 struct mtk_dvo_sync_param *sync,
++				 u32 width_addr, u32 porch_addr)
++{
++	mtk_dvo_mask(dvo, width_addr,
++		     sync->sync_width << VSYNC,
++		     dvo->conf->dimension_mask << VSYNC);
++	mtk_dvo_mask(dvo, width_addr,
++		     sync->front_porch << VFP,
++		     dvo->conf->dimension_mask << VFP);
++	mtk_dvo_mask(dvo, porch_addr,
++		     (sync->back_porch + sync->sync_width) << VSYNC2ACT,
++		     dvo->conf->dimension_mask << VSYNC2ACT);
++	mtk_dvo_mask(dvo, DVO_MUTEX_VSYNC_SET,
++		     INT_SOF_DLY << INT_SOF_DLY_SHIFT,
++		     INT_SOF_DLY_MASK);
++}
++
++static void mtk_dvo_config_vsync_lodd(struct mtk_dvo *dvo,
++				      struct mtk_dvo_sync_param *sync)
++{
++	mtk_dvo_config_vsync(dvo, sync, DVO_TGEN_V0, DVO_TGEN_V1);
++}
++
++static void mtk_dvo_config_interface(struct mtk_dvo *dvo, bool inter)
++{
++	mtk_dvo_mask(dvo, DVO_CON, inter ? INTL_EN : 0, INTL_EN);
++}
++
++static void mtk_dvo_config_fb_size(struct mtk_dvo *dvo, u32 width, u32 height)
++{
++	mtk_dvo_mask(dvo, DVO_SRC_SIZE, width << SRC_HSIZE,
++		     dvo->conf->hvsize_mask << SRC_HSIZE);
++	mtk_dvo_mask(dvo, DVO_SRC_SIZE, height << SRC_VSIZE,
++		     dvo->conf->hvsize_mask << SRC_VSIZE);
++
++	mtk_dvo_mask(dvo, DVO_PIC_SIZE, width << PIC_HSIZE,
++		     dvo->conf->hvsize_mask << PIC_HSIZE);
++	mtk_dvo_mask(dvo, DVO_PIC_SIZE, height << PIC_VSIZE,
++		     dvo->conf->hvsize_mask << PIC_VSIZE);
++
++	mtk_dvo_mask(dvo, DVO_TGEN_H1, DIV_ROUND_UP(width, dvo->conf->pixels_per_iter) << HACT,
++		     dvo->conf->hvsize_mask << HACT);
++	mtk_dvo_mask(dvo, DVO_TGEN_V1, height << VACT,
++		     dvo->conf->hvsize_mask << VACT);
++}
++
++static void mtk_dvo_power_off(struct mtk_dvo *dvo)
++{
++	if (WARN_ON(dvo->refcount == 0))
++		return;
++
++	if (--dvo->refcount != 0)
++		return;
++
++	mtk_dvo_disable(dvo);
++
++	clk_disable_unprepare(dvo->engine_clk);
++	clk_disable_unprepare(dvo->tvd_clk);
++	clk_disable_unprepare(dvo->hf_fdvo_clk);
++}
++
++static int mtk_dvo_power_on(struct mtk_dvo *dvo)
++{
++	int ret;
++
++	if (++dvo->refcount != 1)
++		return 0;
++
++	ret = clk_prepare_enable(dvo->hf_fdvo_clk);
++	if (ret) {
++		dev_err(dvo->dev, "Failed to enable hf_fdvo_clk clock: %d\n", ret);
++		goto err_refcount;
++	}
++
++	ret = clk_prepare_enable(dvo->tvd_clk);
++	if (ret) {
++		dev_err(dvo->dev, "Failed to enable tvd_clk clock: %d\n", ret);
++		goto err_hf_fdvo;
++	}
++
++	ret = clk_prepare_enable(dvo->engine_clk);
++	if (ret) {
++		dev_err(dvo->dev, "Failed to enable engine clock: %d\n", ret);
++		goto err_tvd;
++	}
++
++	return 0;
++
++err_tvd:
++	clk_disable_unprepare(dvo->tvd_clk);
++err_hf_fdvo:
++	clk_disable_unprepare(dvo->hf_fdvo_clk);
++err_refcount:
++	dvo->refcount--;
++	return ret;
++}
++
++static void mtk_dvo_config_csc_enable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_MATRIX_SET, 0x2, DVO_INT_MTX_SEL_MASK);
++	mtk_dvo_mask(dvo, DVO_MATRIX_SET, DVO_CSC_EN, DVO_CSC_EN);
++}
++
++static void mtk_dvo_config_csc_disable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_MATRIX_SET, 0, DVO_INT_MTX_SEL_MASK);
++	mtk_dvo_mask(dvo, DVO_MATRIX_SET, 0, DVO_CSC_EN);
++}
++
++static void mtk_dvo_config_yuv422_enable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_YUV422_SET, DVO_YUV422_EN, DVO_YUV422_EN);
++	mtk_dvo_mask(dvo, DVO_YUV422_SET, DVO_CRYCB_MAP, DVO_CRYCB_MAP);
++}
++
++static void mtk_dvo_config_yuv422_disable(struct mtk_dvo *dvo)
++{
++	mtk_dvo_mask(dvo, DVO_YUV422_SET, 0, DVO_YUV422_EN);
++	mtk_dvo_mask(dvo, DVO_YUV422_SET, 0, DVO_CRYCB_MAP);
++}
++
++static void mtk_dvo_config_color_format(struct mtk_dvo *dvo,
++					enum mtk_dvo_out_color_format format)
++{
++	dev_dbg(dvo->dev, "color format: %d\n", format);
++
++	if (format == MTK_DVO_COLOR_FORMAT_YCBCR_422) {
++		mtk_dvo_config_yuv422_enable(dvo);
++		mtk_dvo_config_csc_enable(dvo);
++	} else {
++		mtk_dvo_config_csc_disable(dvo);
++		mtk_dvo_config_yuv422_disable(dvo);
++	}
++}
++
++static int mtk_dvo_set_display_mode(struct mtk_dvo *dvo,
++				    struct drm_display_mode *mode)
++{
++	struct mtk_dvo_sync_param hsync;
++	struct mtk_dvo_sync_param vsync_lodd = { 0 };
++	struct videomode vm = { 0 };
++	unsigned long pll_rate;
++	unsigned int factor;
++
++	/* let pll_rate can fix the valid range of tvdpll (1G~2GHz) */
++	factor = dvo->conf->cal_factor(mode->clock);
++	drm_display_mode_to_videomode(mode, &vm);
++	if (vm.hactive % 4 != 0) {
++		vm.pixelclock = (vm.hsync_len + vm.hback_porch +
++			vm.hfront_porch + round_up(vm.hactive, 4)) *
++			(vm.vsync_len + vm.vback_porch + vm.vfront_porch + vm.vactive) *
++			drm_mode_vrefresh(mode);
++	}
++	pll_rate = vm.pixelclock * factor;
++
++	dev_dbg(dvo->dev, "Want PLL %lu Hz, pixel clock %lu Hz\n",
++		pll_rate, vm.pixelclock);
++
++	clk_set_rate(dvo->tvd_clk, pll_rate);
++	pll_rate = clk_get_rate(dvo->tvd_clk);
++
++	/*
++	 * Depending on the IP version, we may output a different amount of
++	 * pixels for each iteration: divide the clock by this number and
++	 * adjust the display porches accordingly.
++	 */
++	vm.pixelclock = pll_rate / factor;
++	vm.pixelclock /= dvo->conf->pixels_per_iter;
++	clk_set_rate(dvo->pixel_clk, vm.pixelclock);
++
++	vm.pixelclock = clk_get_rate(dvo->pixel_clk);
++
++	dev_dbg(dvo->dev, "Got  PLL %lu Hz, pixel clock %lu Hz\n",
++		pll_rate, vm.pixelclock);
++
++	hsync.sync_width = vm.hsync_len / dvo->conf->pixels_per_iter;
++	hsync.back_porch = vm.hback_porch / dvo->conf->pixels_per_iter;
++	hsync.front_porch = vm.hfront_porch / dvo->conf->pixels_per_iter;
++	hsync.shift_half_line = false;
++
++	vsync_lodd.sync_width = vm.vsync_len;
++	vsync_lodd.back_porch = vm.vback_porch;
++	vsync_lodd.front_porch = vm.vfront_porch;
++	vsync_lodd.shift_half_line = false;
++
++	mtk_dvo_sw_reset(dvo, true);
++	mtk_dvo_irq_enable(dvo);
++
++	mtk_dvo_config_hsync(dvo, &hsync);
++	mtk_dvo_config_vsync_lodd(dvo, &vsync_lodd);
++
++	mtk_dvo_config_interface(dvo, !!(vm.flags & DISPLAY_FLAGS_INTERLACED));
++
++	if (vm.flags & DISPLAY_FLAGS_INTERLACED)
++		mtk_dvo_config_fb_size(dvo, vm.hactive, vm.vactive >> 1);
++	else
++		mtk_dvo_config_fb_size(dvo, vm.hactive, vm.vactive);
++	mtk_dvo_config_color_format(dvo, dvo->color_format);
++
++	mtk_dvo_info_queue_start(dvo);
++	mtk_dvo_buffer_ctrl(dvo);
++
++	/* eDP DVO: FIFO thresholds for SODI/DVFS/(pre)ultra/urgent */
++	mtk_dvo_trailing_blank_setting(dvo);
++	mtk_dvo_get_gs_level(dvo);
++	mtk_dvo_golden_setting(dvo);
++	mtk_dvo_sodi_setting(dvo, mode);
++
++	if (dvo->conf->pixels_per_iter)
++		mtk_dvo_shadow_ctrl(dvo);
++
++	if (dvo->conf->out_np_sel)
++		mtk_dvo_mask(dvo, DVO_OUTPUT_SET, dvo->conf->out_np_sel,
++			     OUT_NP_SEL);
++
++	mtk_dvo_sw_reset(dvo, false);
++
++	return 0;
++}
++
++static u32 *mtk_dvo_bridge_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
++						      struct drm_bridge_state *bridge_state,
++						      struct drm_crtc_state *crtc_state,
++						      struct drm_connector_state *conn_state,
++						      unsigned int *num_output_fmts)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++	u32 *output_fmts;
++
++	*num_output_fmts = 0;
++
++	if (!dvo->conf->output_fmts) {
++		dev_err(dvo->dev, "output_fmts should not be null\n");
++		return NULL;
++	}
++
++	output_fmts = kcalloc(dvo->conf->num_output_fmts, sizeof(*output_fmts),
++			      GFP_KERNEL);
++	if (!output_fmts)
++		return NULL;
++
++	*num_output_fmts = dvo->conf->num_output_fmts;
++
++	memcpy(output_fmts, dvo->conf->output_fmts,
++	       sizeof(*output_fmts) * dvo->conf->num_output_fmts);
++
++	return output_fmts;
++}
++
++static u32 *mtk_dvo_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
++						     struct drm_bridge_state *bridge_state,
++						     struct drm_crtc_state *crtc_state,
++						     struct drm_connector_state *conn_state,
++						     u32 output_fmt,
++						     unsigned int *num_input_fmts)
++{
++	u32 *input_fmts;
++
++	*num_input_fmts = 0;
++
++	input_fmts = kcalloc(1, sizeof(*input_fmts), GFP_KERNEL);
++	if (!input_fmts)
++		return NULL;
++
++	*num_input_fmts = 1;
++	input_fmts[0] = MEDIA_BUS_FMT_RGB888_1X24;
++
++	return input_fmts;
++}
++
++static int mtk_dvo_bridge_atomic_check(struct drm_bridge *bridge,
++				       struct drm_bridge_state *bridge_state,
++				       struct drm_crtc_state *crtc_state,
++				       struct drm_connector_state *conn_state)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++	unsigned int out_bus_format;
++
++	out_bus_format = bridge_state->output_bus_cfg.format;
++
++	if (out_bus_format == MEDIA_BUS_FMT_FIXED)
++		if (dvo->conf->num_output_fmts)
++			out_bus_format = dvo->conf->output_fmts[0];
++
++	dev_dbg(dvo->dev, "input format 0x%04x, output format 0x%04x\n",
++		bridge_state->input_bus_cfg.format,
++		bridge_state->output_bus_cfg.format);
++
++	dvo->output_fmt = out_bus_format;
++	dvo->bit_num = MTK_DVO_OUT_BIT_NUM_8BITS;
++	dvo->channel_swap = MTK_DVO_OUT_CHANNEL_SWAP_RGB;
++	dvo->yc_map = MTK_DVO_OUT_YC_MAP_RGB;
++	if (out_bus_format == MEDIA_BUS_FMT_YUYV8_1X16)
++		dvo->color_format = MTK_DVO_COLOR_FORMAT_YCBCR_422;
++	else
++		dvo->color_format = MTK_DVO_COLOR_FORMAT_RGB;
++
++	return 0;
++}
++
++static int mtk_dvo_bridge_attach(struct drm_bridge *bridge,
++				 struct drm_encoder *encoder,
++				 enum drm_bridge_attach_flags flags)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++	int ret;
++
++	ret = drm_bridge_attach(encoder, dvo->next_bridge, &dvo->bridge, flags);
++	if (ret)
++		dev_err(dvo->dev, "Failed to attach next bridge: %d\n", ret);
++
++	return ret;
++}
++
++static void mtk_dvo_bridge_mode_set(struct drm_bridge *bridge,
++				    const struct drm_display_mode *mode,
++				    const struct drm_display_mode *adjusted_mode)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++
++	drm_mode_copy(&dvo->mode, adjusted_mode);
++}
++
++static void mtk_dvo_bridge_disable(struct drm_bridge *bridge,
++				   struct drm_atomic_commit *commit)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++
++	mtk_dvo_power_off(dvo);
++}
++
++static void mtk_dvo_bridge_enable(struct drm_bridge *bridge,
++				  struct drm_atomic_commit *commit)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++
++	mtk_dvo_power_on(dvo);
++	mtk_dvo_set_display_mode(dvo, &dvo->mode);
++	mtk_dvo_enable(dvo);
++}
++
++static enum drm_mode_status
++mtk_dvo_bridge_mode_valid(struct drm_bridge *bridge,
++			  const struct drm_display_info *info,
++			  const struct drm_display_mode *mode)
++{
++	struct mtk_dvo *dvo = bridge_to_dvo(bridge);
++
++	if (dvo->conf->max_clock_khz && mode->clock > dvo->conf->max_clock_khz)
++		return MODE_CLOCK_HIGH;
++
++	return MODE_OK;
++}
++
++static const struct drm_bridge_funcs mtk_dvo_bridge_funcs = {
++	.attach = mtk_dvo_bridge_attach,
++	.mode_set = mtk_dvo_bridge_mode_set,
++	.mode_valid = mtk_dvo_bridge_mode_valid,
++	.atomic_disable = mtk_dvo_bridge_disable,
++	.atomic_enable = mtk_dvo_bridge_enable,
++	.atomic_check = mtk_dvo_bridge_atomic_check,
++	.atomic_get_output_bus_fmts = mtk_dvo_bridge_atomic_get_output_bus_fmts,
++	.atomic_get_input_bus_fmts = mtk_dvo_bridge_atomic_get_input_bus_fmts,
++	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
++	.atomic_create_state = drm_atomic_helper_bridge_create_state,
++};
++
++static const struct drm_encoder_funcs mtk_dvo_encoder_funcs = {
++	.destroy = drm_encoder_cleanup,
++};
++
++void mtk_dvo_start(struct device *dev)
++{
++	struct mtk_dvo *dvo = dev_get_drvdata(dev);
++
++	mtk_dvo_power_on(dvo);
++}
++
++void mtk_dvo_stop(struct device *dev)
++{
++	struct mtk_dvo *dvo = dev_get_drvdata(dev);
++
++	mtk_dvo_power_off(dvo);
++}
++
++unsigned int mtk_dvo_encoder_index(struct device *dev)
++{
++	struct mtk_dvo *dvo = dev_get_drvdata(dev);
++	unsigned int encoder_index = drm_encoder_index(&dvo->encoder);
++
++	dev_dbg(dev, "encoder index:%d\n", encoder_index);
++	return encoder_index;
++}
++
++static int mtk_dvo_bind(struct device *dev, struct device *master, void *data)
++{
++	struct mtk_dvo *dvo = dev_get_drvdata(dev);
++	struct drm_device *drm_dev = data;
++	struct mtk_drm_private *priv = drm_dev->dev_private;
++	int ret;
++
++	dvo->mmsys_dev = priv->mmsys_dev;
++	ret = drm_encoder_init(drm_dev, &dvo->encoder, &mtk_dvo_encoder_funcs,
++			       DRM_MODE_ENCODER_TMDS, NULL);
++	if (ret) {
++		dev_err(dev, "Failed to initialize encoder: %d\n", ret);
++		return ret;
++	}
++
++	ret = mtk_find_possible_crtcs(drm_dev, dvo->dev);
++	if (ret < 0)
++		goto err_cleanup;
++	dvo->encoder.possible_crtcs = ret;
++
++	ret = drm_bridge_attach(&dvo->encoder, &dvo->bridge, NULL,
++				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
++	if (ret)
++		goto err_cleanup;
++
++	dvo->connector = drm_bridge_connector_init(drm_dev, &dvo->encoder);
++	if (IS_ERR(dvo->connector)) {
++		dev_err(dev, "Unable to create bridge connector\n");
++		ret = PTR_ERR(dvo->connector);
++		goto err_cleanup;
++	}
++
++	return 0;
++
++err_cleanup:
++	drm_encoder_cleanup(&dvo->encoder);
++	return ret;
++}
++
++static void mtk_dvo_unbind(struct device *dev, struct device *master,
++			   void *data)
++{
++	struct mtk_dvo *dvo = dev_get_drvdata(dev);
++
++	drm_encoder_cleanup(&dvo->encoder);
++}
++
++static const struct component_ops mtk_dvo_component_ops = {
++	.bind = mtk_dvo_bind,
++	.unbind = mtk_dvo_unbind,
++};
++
++static unsigned int mt8189_calculate_factor(int clock)
++{
++	if (clock < 70000)
++		return 4;
++	else if (clock < 200000)
++		return 2;
++	else
++		return 1;
++}
++
++static const u32 mt8189_output_fmts[] = {
++	MEDIA_BUS_FMT_RGB888_1X24,
++	MEDIA_BUS_FMT_YUYV8_1X16,
++};
++
++static const struct mtk_dvo_conf mt8189_edp_conf = {
++	.cal_factor = mt8189_calculate_factor,
++	.out_np_sel = 0x2,
++	.max_clock_khz = 640000,
++	.output_fmts = mt8189_output_fmts,
++	.num_output_fmts = ARRAY_SIZE(mt8189_output_fmts),
++	.pixels_per_iter = 4,
++	.dimension_mask = HFP_MASK,
++	.hvsize_mask = PIC_HSIZE_MASK,
++};
++
++static int mtk_dvo_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct mtk_dvo *dvo;
++	int ret;
++
++	dvo = devm_drm_bridge_alloc(dev, struct mtk_dvo, bridge,
++				    &mtk_dvo_bridge_funcs);
++	if (IS_ERR(dvo))
++		return PTR_ERR(dvo);
++
++	dvo->dev = dev;
++	dvo->conf = of_device_get_match_data(dev);
++	dvo->output_fmt = MEDIA_BUS_FMT_RGB888_1X24;
++
++	dvo->regs = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(dvo->regs))
++		return dev_err_probe(dev, PTR_ERR(dvo->regs),
++				     "Failed to ioremap mem resource\n");
++
++	dvo->engine_clk = devm_clk_get(dev, "engine");
++	if (IS_ERR(dvo->engine_clk))
++		return dev_err_probe(dev, PTR_ERR(dvo->engine_clk),
++				     "Failed to get engine clock\n");
++
++	dvo->pixel_clk = devm_clk_get(dev, "pixel");
++	if (IS_ERR(dvo->pixel_clk))
++		return dev_err_probe(dev, PTR_ERR(dvo->pixel_clk),
++				     "Failed to get pixel clock\n");
++
++	dvo->tvd_clk = devm_clk_get(dev, "pll");
++	if (IS_ERR(dvo->tvd_clk))
++		return dev_err_probe(dev, PTR_ERR(dvo->tvd_clk),
++				     "Failed to get tvdpll clock\n");
++
++	dvo->hf_fdvo_clk = devm_clk_get(dev, "hf_fdvo_clk");
++	if (IS_ERR(dvo->hf_fdvo_clk))
++		return dev_err_probe(dev, PTR_ERR(dvo->hf_fdvo_clk),
++				     "Failed to get hf_fdvo_clk clock\n");
++
++	if (dvo->conf->irq_en) {
++		dvo->irq = platform_get_irq(pdev, 0);
++		if (dvo->irq < 0)
++			return dvo->irq;
++
++		ret = devm_request_irq(dev, dvo->irq, mtk_dvo_irq_handler,
++				       IRQF_TRIGGER_NONE, dev_name(dev), dvo);
++		if (ret < 0)
++			return dev_err_probe(dev, ret, "Failed to request irq %d\n",
++					     dvo->irq);
++	}
++
++	/* Output is port@1 (port@0 is the input from mmsys); fall back to port@0 */
++	dvo->next_bridge = devm_drm_of_get_bridge(dev, dev->of_node, 1, -1);
++	if (IS_ERR(dvo->next_bridge) && PTR_ERR(dvo->next_bridge) == -ENODEV)
++		dvo->next_bridge = devm_drm_of_get_bridge(dev, dev->of_node, 0, 0);
++	if (IS_ERR(dvo->next_bridge))
++		return dev_err_probe(dev, PTR_ERR(dvo->next_bridge),
++				     "Failed to get bridge node: %pOF\n", dev->of_node);
++
++	dev_dbg(dev, "Found bridge node: %pOF\n", dvo->next_bridge->of_node);
++
++	platform_set_drvdata(pdev, dvo);
++
++	dvo->bridge.of_node = dev->of_node;
++	dvo->bridge.type = DRM_MODE_CONNECTOR_DPI;
++
++	ret = devm_drm_bridge_add(dev, &dvo->bridge);
++	if (ret)
++		return ret;
++
++	ret = component_add(dev, &mtk_dvo_component_ops);
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to add component.\n");
++
++	return 0;
++}
++
++static void mtk_dvo_remove(struct platform_device *pdev)
++{
++	component_del(&pdev->dev, &mtk_dvo_component_ops);
++}
++
++static const struct of_device_id mtk_dvo_of_ids[] = {
++	{ .compatible = "mediatek,mt8189-edp-dvo", .data = &mt8189_edp_conf },
++	{ /* sentinel */ },
++};
++MODULE_DEVICE_TABLE(of, mtk_dvo_of_ids);
++
++struct platform_driver mtk_dvo_driver = {
++	.probe = mtk_dvo_probe,
++	.remove = mtk_dvo_remove,
++	.driver = {
++		.name = "mediatek-dvo",
++		.of_match_table = mtk_dvo_of_ids,
++	},
++};
+diff --git a/drivers/gpu/drm/mediatek/mtk_dvo_regs.h b/drivers/gpu/drm/mediatek/mtk_dvo_regs.h
+new file mode 100644
+index 000000000..f71db142f
+--- /dev/null
++++ b/drivers/gpu/drm/mediatek/mtk_dvo_regs.h
+@@ -0,0 +1,185 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2014 MediaTek Inc.
++ * Author: Jie Qiu <jie.qiu@mediatek.com>
++ *
++ * Ported from the ChromeOS chromeos-6.6 kernel tree.
++ */
++#ifndef __MTK_DVO_REGS_H
++#define __MTK_DVO_REGS_H
++
++#define DVO_EN			0x00
++#define EN				BIT(0)
++#define DVO_FORCE_ON			BIT(4)
++#define LINK_OFF			BIT(8)
++#define DVO_RET			0x04
++#define SWRST				BIT(0)
++#define SWRST_SEL			BIT(4)
++#define DVO_INTEN		0x08
++#define INT_VFP_START_EN		BIT(0)
++#define INT_VSYNC_START_EN		BIT(1)
++#define INT_VSYNC_END_EN		BIT(2)
++#define INT_VDE_START_EN		BIT(3)
++#define INT_VDE_END_EN			BIT(4)
++#define INT_WR_INFOQ_REG_EN		BIT(5)
++#define INT_TARGET_LINE0_EN		BIT(6)
++#define INT_TARGET_LINE1_EN		BIT(7)
++#define INT_TARGET_LINE2_EN		BIT(8)
++#define INT_TARGET_LINE3_EN		BIT(9)
++#define INT_WR_INFOQ_START_EN		BIT(10)
++#define INT_WR_INFOQ_END_EN		BIT(11)
++#define EXT_VSYNC_START_EN		BIT(12)
++#define EXT_VSYNC_END_EN		BIT(13)
++#define EXT_VDE_START_EN		BIT(14)
++#define EXT_VDE_END_EN			BIT(15)
++#define EXT_VBLANK_END_EN		BIT(16)
++#define UNDERFLOW_EN			BIT(17)
++#define INFOQ_ABORT_EN			BIT(18)
++
++#define DVO_INTSTA		0x0c
++#define INT_VFP_START_STA		BIT(0)
++#define INT_VSYNC_START_STA		BIT(1)
++#define INT_VSYNC_END_STA		BIT(2)
++#define INT_VDE_START_STA		BIT(3)
++#define INT_VDE_END_STA			BIT(4)
++#define INT_WR_INFOQ_REG_STA		BIT(5)
++#define INT_TARGET_LINE0_STA		BIT(6)
++#define INT_TARGET_LINE1_STA		BIT(7)
++#define INT_TARGET_LINE2_STA		BIT(8)
++#define INT_TARGET_LINE3_STA		BIT(9)
++#define INT_WR_INFOQ_START_STA		BIT(10)
++#define INT_WR_INFOQ_END_STA		BIT(11)
++#define EXT_VSYNC_START_STA		BIT(12)
++#define EXT_VSYNC_END_STA		BIT(13)
++#define EXT_VDE_START_STA		BIT(14)
++#define EXT_VDE_END_STA			BIT(15)
++#define EXT_VBLANK_END_STA		BIT(16)
++#define INT_UNDERFLOW_STA		BIT(17)
++#define INFOQ_ABORT_STA			BIT(18)
++
++#define DVO_CON			0x10
++#define INTL_EN				BIT(0)
++
++#define DVO_OUTPUT_SET		0x18
++#define OUT_NP_SEL			(0x3 << 0)
++#define BIT_SWAP			BIT(4)
++#define CH_SWAP_MASK			(0x7 << 5)
++#define SWAP_RGB			0x00
++#define SWAP_GBR			0x01
++#define SWAP_BRG			0x02
++#define SWAP_RBG			0x03
++#define SWAP_GRB			0x04
++#define SWAP_BGR			0x05
++#define PXL_SWAP			BIT(8)
++#define R_MASK				BIT(12)
++#define G_MASK				BIT(13)
++#define B_MASK				BIT(14)
++#define DE_MASK				BIT(16)
++#define HS_MASK				BIT(17)
++#define VS_MASK				BIT(18)
++#define HS_INV				BIT(19)
++#define VS_INV				BIT(20)
++
++#define DVO_SRC_SIZE		0x20
++#define SRC_HSIZE			0
++#define SRC_HSIZE_MASK			(0xffff << 0)
++#define SRC_VSIZE			16
++#define SRC_VSIZE_MASK			(0xffff << 16)
++
++#define DVO_PIC_SIZE		0x24
++#define PIC_HSIZE			0
++#define PIC_HSIZE_MASK			(0xffff << 0)
++#define PIC_VSIZE			16
++#define PIC_VSIZE_MASK			(0xffff << 16)
++
++#define DVO_TGEN_H0		0x50
++#define HFP				0
++#define HFP_MASK			(0xffff << 0)
++#define HSYNC				16
++#define HSYNC_MASK			(0xffff << 16)
++
++#define DVO_TGEN_H1		0x54
++#define HSYNC2ACT			0
++#define HSYNC2ACT_MASK			(0xffff << 0)
++#define HACT				16
++#define HACT_MASK			(0xffff << 16)
++
++#define DVO_TGEN_V0		0x58
++#define VFP				0
++#define VFP_MASK			(0xffff << 0)
++#define VSYNC				16
++#define VSYNC_MASK			(0xffff << 16)
++
++#define DVO_TGEN_V1		0x5c
++#define VSYNC2ACT			0
++#define VSYNC2ACT_MASK			(0xffff << 0)
++#define VACT				16
++#define VACT_MASK			(0xffff << 16)
++
++#define DVO_TGEN_INFOQ_LATENCY	0x80
++#define INFOQ_START_LATENCY		0
++#define INFOQ_START_LATENCY_MASK	(0xffff << 0)
++#define INFOQ_END_LATENCY		16
++#define INFOQ_END_LATENCY_MASK		(0xffff << 16)
++
++#define DVO_BUF_CON0		0x220
++#define DISP_BUF_EN			BIT(0)
++#define FIFO_UNDERFLOW_DONE_BLOCK	BIT(4)
++
++#define DVO_TGEN_V_LAST_TRAILING_BLANK	0x6c
++#define V_LAST_TRAILING_BLANK			0
++#define V_LAST_TRAILING_BLANK_MASK		(0xffff << 0)
++
++#define DVO_TGEN_OUTPUT_DELAY_LINE	0x7c
++#define EXT_TG_DLY_LINE				0
++#define EXT_TG_DLY_LINE_MASK			(0xffff << 0)
++
++#define DVO_MUTEX_VSYNC_SET		0x84
++#define INT_SOF_DLY_SHIFT		(20)
++#define INT_SOF_DLY_MASK		(0x000f << 20)
++#define MUTEX_VSYNC_SEL			BIT(0)
++#define MUTEX_VFP_MASK			GENMASK(19, 4)
++
++#define DVO_PATTERN_CTRL		0x100
++#define PRE_PAT_EN				BIT(0)
++#define PRE_PAT_SEL_MASK			(0x7 << 4)
++#define COLOR_BAR				(0x4 << 4)
++#define PRE_PAT_FORCE_ON			BIT(8)
++
++#define DVO_PATTERN_COLOR		0x104
++#define PAT_R					(0x3ff << 0)
++#define PAT_G					(0x3ff << 10)
++#define PAT_B					(0x3ff << 20)
++
++#define DVO_SHADOW_CTRL			0x190
++#define FORCE_COMMIT				BIT(0)
++#define BYPASS_SHADOW				BIT(1)
++#define READ_WRK_REG				BIT(2)
++
++#define DVO_SIZE			0x18
++#define DVO_TGEN_VWIDTH			0x28
++#define DVO_TGEN_VPORCH			0x2c
++#define DVO_TGEN_HPORCH			0x24
++#define DVO_TGEN_HWIDTH			0x20
++
++#define DVO_BUF_SODI_HIGHT		0x230
++#define DVO_BUF_SODI_LOW		0x234
++#define DVO_BUF_DVFS_HIGHT		0x238
++#define DVO_BUF_DVFS_LOW		0x23c
++#define DVO_BUF_PREULTRA_HIGHT		0x240
++#define DVO_BUF_PREULTRA_LOW		0x244
++#define DVO_BUF_ULTRA_HIGHT		0x248
++#define DVO_BUF_ULTRA_LOW		0x24c
++#define DVO_BUF_URGENT_HIGHT		0x250
++#define DVO_BUF_URGENT_LOW		0x254
++#define DVO_DISP_BUF_MASK		GENMASK(31, 0)
++
++#define DVO_MATRIX_SET			0x140
++#define DVO_CSC_EN			BIT(0)
++#define DVO_INT_MTX_SEL_MASK		GENMASK(8, 4)
++
++#define DVO_YUV422_SET			0x170
++#define DVO_YUV422_EN			BIT(0)
++#define DVO_CRYCB_MAP			BIT(8)
++
++#endif /* __MTK_DVO_REGS_H */
+diff --git a/drivers/phy/mediatek/Kconfig b/drivers/phy/mediatek/Kconfig
+index 9beffd1fb..a18c99a23 100644
+--- a/drivers/phy/mediatek/Kconfig
++++ b/drivers/phy/mediatek/Kconfig
+@@ -110,3 +110,16 @@ config PHY_MTK_DP
+ 	select GENERIC_PHY
+ 	help
+ 	  Support DisplayPort PHY for MediaTek SoCs.
++
++config PHY_MTK_EDP
++	tristate "MediaTek eDP-PHY Driver (MT8189)"
++	depends on ARCH_MEDIATEK || COMPILE_TEST
++	select GENERIC_PHY
++	select REGMAP
++	default PHY_MTK_DP
++	help
++	  Support for the Embedded DisplayPort PHY found in the newer eDP TX
++	  IP of MediaTek SoCs such as MT8189. The PHY is instantiated by the
++	  MediaTek DP/eDP controller driver (mtk_dp) as a child device.
++	  Say Y or M here if you want to use the internal eDP panel on
++	  MT8189 based devices such as the Skywalker Chromebooks.
+diff --git a/drivers/phy/mediatek/Makefile b/drivers/phy/mediatek/Makefile
+index 7e984c7cf..9e86a8941 100644
+--- a/drivers/phy/mediatek/Makefile
++++ b/drivers/phy/mediatek/Makefile
+@@ -4,6 +4,7 @@
+ #
+ 
+ obj-$(CONFIG_PHY_MTK_DP)		+= phy-mtk-dp.o
++obj-$(CONFIG_PHY_MTK_EDP)		+= phy-mtk-edp.o
+ obj-$(CONFIG_PHY_MTK_PCIE)		+= phy-mtk-pcie.o
+ obj-$(CONFIG_PHY_MTK_PCIE_SPHY)		+= phy-mtk-pcie-sphy.o
+ obj-$(CONFIG_PHY_MTK_TPHY)		+= phy-mtk-tphy.o
+diff --git a/drivers/phy/mediatek/phy-mtk-edp.c b/drivers/phy/mediatek/phy-mtk-edp.c
+new file mode 100644
+index 000000000..5bd04bea2
+--- /dev/null
++++ b/drivers/phy/mediatek/phy-mtk-edp.c
+@@ -0,0 +1,260 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek Embedded DisplayPort PHY driver for the eDP TX v2 IP (MT8189)
++ *
++ * Copyright (c) 2019-2022 MediaTek Inc.
++ * Copyright (c) 2022 BayLibre
++ *
++ * Based on the ChromeOS phy-mtk-edp.c driver.
++ *
++ * Unlike the DP PHY found in MT8195, the PHY of this IP lives in its own
++ * register range (second "reg" entry of the eDP TX node). It is instantiated
++ * by the mtk_dp driver as a child platform device, which hands over a regmap
++ * for the PHY register range as platform data.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/phy/phy.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++#define MTK_EDP_PHY_MAX_LANES		4
++
++/* PHYD (digital) per-lane register blocks */
++#define PHYD_DIG_LAN_OFFSET(n)		(0x1000 + 0x100 * (n))
++
++/* PHYD (digital) global register block */
++#define PHYD_DIG_GLB_OFFSET		0x1400
++
++#define PHYD_DIG_PLL_CTL_0		(PHYD_DIG_GLB_OFFSET + 0x10)
++#define FORCE_PWR_STATE_MASK			GENMASK(2, 0)
++#define FORCE_PWR_STATE_ALL_ON			0x7
++
++#define PHYD_DIG_PLL_CTL_1		(PHYD_DIG_GLB_OFFSET + 0x14)
++
++#define PHYD_DIG_SW_RST			(PHYD_DIG_GLB_OFFSET + 0x38)
++#define DP_GLB_SW_RST_PHYD			BIT(0)
++
++#define PHYD_DIG_BIT_RATE		(PHYD_DIG_GLB_OFFSET + 0x3c)
++
++#define PHYD_DIG_TX_CTL_0		(PHYD_DIG_GLB_OFFSET + 0x74)
++
++enum mtk_edp_phy_bit_rate {
++	MTK_EDP_PHY_RBR,
++	MTK_EDP_PHY_HBR,
++	MTK_EDP_PHY_HBR2,
++	MTK_EDP_PHY_HBR3,
++	MTK_EDP_PHY_RATE_MAX,
++};
++
++/**
++ * struct mtk_edp_phy_pdata - SoC specific eDP PHY data
++ * @tx_ln_en_mask:   Lane enable field in PHYD_DIG_TX_CTL_0
++ * @tx_ctl_clr_mask: Bits of PHYD_DIG_TX_CTL_0 cleared when setting lanes
++ * @bit_rate:        PHYD_DIG_BIT_RATE values for RBR/HBR/HBR2/HBR3
++ * @ssc_ctl:         SSC control bit in PHYD_DIG_PLL_CTL_1 (set = SSC off)
++ * @drv_force:       Offset of DRIVING_FORCE in each PHYD lane block
++ * @swing_mask:      Voltage swing field in DRIVING_FORCE
++ * @pre_emph_mask:   Pre-emphasis field in DRIVING_FORCE
++ */
++struct mtk_edp_phy_pdata {
++	u32 tx_ln_en_mask;
++	u32 tx_ctl_clr_mask;
++	u8 bit_rate[MTK_EDP_PHY_RATE_MAX];
++	u32 ssc_ctl;
++	u32 drv_force;
++	u32 swing_mask;
++	u32 pre_emph_mask;
++};
++
++struct mtk_edp_phy {
++	struct device *dev;
++	struct regmap *regs;
++	const struct mtk_edp_phy_pdata *pdata;
++};
++
++static void mtk_edp_phy_reset_swing_pre(struct mtk_edp_phy *edp_phy)
++{
++	const struct mtk_edp_phy_pdata *pdata = edp_phy->pdata;
++	int i;
++
++	for (i = 0; i < MTK_EDP_PHY_MAX_LANES; i++)
++		regmap_clear_bits(edp_phy->regs,
++				  PHYD_DIG_LAN_OFFSET(i) + pdata->drv_force,
++				  pdata->swing_mask | pdata->pre_emph_mask);
++}
++
++static int mtk_edp_phy_init(struct phy *phy)
++{
++	struct mtk_edp_phy *edp_phy = phy_get_drvdata(phy);
++
++	/* Force the PHYD power state machine to "all on" */
++	regmap_update_bits(edp_phy->regs, PHYD_DIG_PLL_CTL_0,
++			   FORCE_PWR_STATE_MASK, FORCE_PWR_STATE_ALL_ON);
++
++	return 0;
++}
++
++static int mtk_edp_phy_configure(struct phy *phy, union phy_configure_opts *opts)
++{
++	struct mtk_edp_phy *edp_phy = phy_get_drvdata(phy);
++	const struct mtk_edp_phy_pdata *pdata = edp_phy->pdata;
++	enum mtk_edp_phy_bit_rate rate;
++	u32 val;
++
++	if (opts->dp.set_rate) {
++		switch (opts->dp.link_rate) {
++		case 1620:
++			rate = MTK_EDP_PHY_RBR;
++			break;
++		case 2700:
++			rate = MTK_EDP_PHY_HBR;
++			break;
++		case 5400:
++			rate = MTK_EDP_PHY_HBR2;
++			break;
++		case 8100:
++			rate = MTK_EDP_PHY_HBR3;
++			break;
++		default:
++			dev_err(&phy->dev, "Unsupported link rate %u\n",
++				opts->dp.link_rate);
++			return -EINVAL;
++		}
++		regmap_write(edp_phy->regs, PHYD_DIG_BIT_RATE,
++			     pdata->bit_rate[rate]);
++	}
++
++	if (opts->dp.set_lanes) {
++		if (opts->dp.lanes > MTK_EDP_PHY_MAX_LANES) {
++			dev_err(&phy->dev, "Wrong lanes config %u\n",
++				opts->dp.lanes);
++			return -EINVAL;
++		}
++
++		/*
++		 * The ChromeOS driver clears the low nibble of TX_CTL_0 here
++		 * on MT8189; keep doing that, and enable the active lanes in
++		 * the lane enable field.
++		 */
++		val = 0;
++		if (opts->dp.lanes)
++			val = field_prep(pdata->tx_ln_en_mask,
++					 GENMASK(opts->dp.lanes - 1, 0));
++		regmap_update_bits(edp_phy->regs, PHYD_DIG_TX_CTL_0,
++				   pdata->tx_ctl_clr_mask | pdata->tx_ln_en_mask,
++				   val);
++	}
++
++	regmap_update_bits(edp_phy->regs, PHYD_DIG_PLL_CTL_1, pdata->ssc_ctl,
++			   opts->dp.ssc ? 0 : pdata->ssc_ctl);
++
++	return 0;
++}
++
++static int mtk_edp_phy_reset(struct phy *phy)
++{
++	struct mtk_edp_phy *edp_phy = phy_get_drvdata(phy);
++
++	/*
++	 * Make sure that PHYD is out of reset. Note that the ChromeOS driver
++	 * never actually pulses this reset (its assert write uses an empty
++	 * mask), so do not assert it here either: that is the sequence that
++	 * has been validated on MT8189 hardware.
++	 */
++	regmap_set_bits(edp_phy->regs, PHYD_DIG_SW_RST, DP_GLB_SW_RST_PHYD);
++	usleep_range(50, 200);
++
++	mtk_edp_phy_reset_swing_pre(edp_phy);
++
++	return 0;
++}
++
++static const struct phy_ops mtk_edp_phy_ops = {
++	.init = mtk_edp_phy_init,
++	.configure = mtk_edp_phy_configure,
++	.reset = mtk_edp_phy_reset,
++	.owner = THIS_MODULE,
++};
++
++static void mtk_edp_phy_remove_lookup(void *data)
++{
++	struct phy *phy = data;
++	struct mtk_edp_phy *edp_phy = phy_get_drvdata(phy);
++
++	phy_remove_lookup(phy, "dp", dev_name(edp_phy->dev));
++}
++
++static int mtk_edp_phy_probe(struct platform_device *pdev)
++{
++	const struct platform_device_id *id = platform_get_device_id(pdev);
++	struct device *dev = &pdev->dev;
++	struct mtk_edp_phy *edp_phy;
++	struct regmap **regs = dev_get_platdata(dev);
++	struct phy *phy;
++	int ret;
++
++	if (!regs || !*regs)
++		return dev_err_probe(dev, -EINVAL,
++				     "No PHY regmap passed as platform data\n");
++
++	edp_phy = devm_kzalloc(dev, sizeof(*edp_phy), GFP_KERNEL);
++	if (!edp_phy)
++		return -ENOMEM;
++
++	edp_phy->dev = dev;
++	edp_phy->regs = *regs;
++	edp_phy->pdata = (const struct mtk_edp_phy_pdata *)id->driver_data;
++
++	phy = devm_phy_create(dev, NULL, &mtk_edp_phy_ops);
++	if (IS_ERR(phy))
++		return dev_err_probe(dev, PTR_ERR(phy),
++				     "Failed to create eDP PHY\n");
++
++	phy_set_drvdata(phy, edp_phy);
++
++	ret = phy_create_lookup(phy, "dp", dev_name(dev));
++	if (ret)
++		return ret;
++
++	return devm_add_action_or_reset(dev, mtk_edp_phy_remove_lookup, phy);
++}
++
++static const struct mtk_edp_phy_pdata mt8189_edp_phy_pdata = {
++	.tx_ln_en_mask = GENMASK(7, 4),
++	.tx_ctl_clr_mask = GENMASK(3, 0),
++	.bit_rate = {
++		[MTK_EDP_PHY_RBR] = 0x0,
++		[MTK_EDP_PHY_HBR] = 0x1,
++		[MTK_EDP_PHY_HBR2] = 0x2,
++		[MTK_EDP_PHY_HBR3] = 0x3,
++	},
++	.ssc_ctl = BIT(8),
++	.drv_force = 0x18,
++	.swing_mask = GENMASK(2, 1),
++	.pre_emph_mask = GENMASK(6, 5),
++};
++
++static const struct platform_device_id mtk_edp_phy_id_table[] = {
++	{ "mediatek-mt8189-edp-phy", (kernel_ulong_t)&mt8189_edp_phy_pdata },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(platform, mtk_edp_phy_id_table);
++
++static struct platform_driver mtk_edp_phy_driver = {
++	.probe = mtk_edp_phy_probe,
++	.id_table = mtk_edp_phy_id_table,
++	.driver = {
++		.name = "mediatek-edp-phy",
++	},
++};
++module_platform_driver(mtk_edp_phy_driver);
++
++MODULE_AUTHOR("Markus Schneider-Pargmann <msp@baylibre.com>");
++MODULE_DESCRIPTION("MediaTek eDP PHY Driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/soc/mediatek/mt8189-mmsys.h b/drivers/soc/mediatek/mt8189-mmsys.h
+new file mode 100644
+index 000000000..32542fcc4
+--- /dev/null
++++ b/drivers/soc/mediatek/mt8189-mmsys.h
+@@ -0,0 +1,300 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2024 MediaTek Inc.
++ */
++
++#ifndef __SOC_MEDIATEK_MT8189_MMSYS_H
++#define __SOC_MEDIATEK_MT8189_MMSYS_H
++
++#include <linux/soc/mediatek/mtk-mmsys.h>
++
++#define MT8189_MMSYS_SW0_RST_B				0x190
++
++#define MT8189_MMSYS_GCE_EVENT_SEL			0x308
++#define MT8189_EVENT_GCE_EN					(BIT(0) | BIT(1))
++
++#define MT8189_DISP_OVL0_OUT0_MOUT_EN 0xc10
++	#define MT8189_MOUT_DISP_OVL0_TO_DISP_RSZ0 BIT(0)
++	#define MT8189_MOUT_DISP_OVL0_TO_DISP_RDMA0 BIT(1)
++	#define MT8189_MOUT_DISP_OVL0_TO_DISP_WDMA0 BIT(2)
++
++#define MT8189_DISP_OVL1_OUT0_MOUT_EN 0xc14
++	#define MT8189_MOUT_DISP_OVL1_TO_DISP_RSZ1 BIT(0)
++	#define MT8189_MOUT_DISP_OVL1_TO_DISP_RDMA1 BIT(1)
++	#define MT8189_MOUT_DISP_OVL1_TO_DISP_WDMA1 BIT(2)
++#define MT8189_DISP_OVL_OUT0_MOUT_MASK 0x7
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR0_MOUT_EN 0xc74
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR0_TO_COMP_OUT_CROSSBAR5 BIT(5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR1_MOUT_EN 0xc78
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_COMP_OUT_CROSSBAR5 BIT(5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR2_MOUT_EN 0xc7c
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR2_TO_COMP_OUT_CROSSBAR5 BIT(5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR3_MOUT_EN 0xc80
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_COMP_OUT_CROSSBAR5 BIT(5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR4_MOUT_EN 0xc84
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_COMP_OUT_CROSSBAR5 BIT(5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR5_MOUT_EN 0xc88
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR5_TO_COMP_OUT_CROSSBAR5 BIT(5)
++#define MT8189_OVL_PQ_OUT_CROSSBAR_MOUT_MASK 0x3f
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR0_SEL_IN 0xc8c
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR0_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR1_SEL_IN 0xc90
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR1_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR2_SEL_IN 0xc94
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR2_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR3_SEL_IN 0xc98
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR3_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR4_SEL_IN 0xc9c
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR4_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_OVL_PQ_OUT_CROSSBAR5_SEL_IN 0xca0
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_DITER0 (0)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_RDMA0_RSZ0_SOUT (1)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_OVL0_OUT0_MOUT (2)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_DITER1 (3)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_RDMA1_RSZ1_SOUT (4)
++	#define MT8189_SEL_IN_OVL_PQ_OUT_CROSSBAR5_FROM_DISP_OVL1_OUT0_MOUT (5)
++
++#define MT8189_COMP_OUT_CROSSBAR0_MOUT_EN 0xd70
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR0_TO_DISP_WDMA1 BIT(5)
++
++#define MT8189_COMP_OUT_CROSSBAR1_MOUT_EN 0xd74
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR1_TO_DISP_WDMA1 BIT(5)
++
++#define MT8189_COMP_OUT_CROSSBAR2_MOUT_EN 0xd78
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR2_TO_DISP_WDMA1 BIT(5)
++
++#define MT8189_COMP_OUT_CROSSBAR3_MOUT_EN 0xd7c
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR3_TO_DISP_WDMA1 BIT(5)
++
++#define MT8189_COMP_OUT_CROSSBAR4_MOUT_EN 0xd80
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_WDMA1 BIT(5)
++
++#define MT8189_COMP_OUT_CROSSBAR5_MOUT_EN 0xd84
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_DSI0 BIT(0)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_DVO0 BIT(1)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_DVO1 BIT(2)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DPI0 BIT(3)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_WDMA0 BIT(4)
++	#define MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_WDMA1 BIT(5)
++
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_DISP_DSC_WRAP0_0 BIT(0)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_DISP_DSC_WRAP0_1 BIT(1)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_VPP_MERGE0_0 BIT(2)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_VPP_MERGE0_1  BIT(3)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_COMP_OUT_CROSSBAR4 BIT(4)
++	#define MT8189_MOUT_OVL_PQ_OUT_CROSSBAR3_TO_COMP_OUT_CROSSBAR5 BIT(5)
++#define MT8189_COMP_OUT_CROSSBAR_MOUT_MASK 0x3f
++
++#define MT8189_COMP_OUT_CROSSBAR0_SEL_IN 0xd88
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR0_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_COMP_OUT_CROSSBAR1_SEL_IN 0xd8c
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR1_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_COMP_OUT_CROSSBAR2_SEL_IN 0xd90
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR2_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_COMP_OUT_CROSSBAR3_SEL_IN 0xd94
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR3_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_COMP_OUT_CROSSBAR4_SEL_IN 0xd98
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR4_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_COMP_OUT_CROSSBAR5_SEL_IN 0xd9c
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_DISP_DSC_WRAP0_0 (0)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_DISP_DSC_WRAP0_1 (1)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_VPP_MERGE0_0 (2)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_VPP_MERGE0_1 (3)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_OVL_PQ_OUT_CROSSBAR4 (4)
++	#define MT8189_SEL_IN_COMP_OUT_CROSSBAR5_FROM_OVL_PQ_OUT_CROSSBAR5 (5)
++
++#define MT8189_DISP_RDMA0_RSZ0_SOUT_SEL 0xe00
++	#define MT8189_SOUT_DISP_RDMA0_RSZ0_TO_OVL_PQ_OUT_CROSSBAR1 (0)
++	#define MT8189_SOUT_DISP_RDMA0_RSZ0_TO_DISP_COLOR0 (1)
++
++#define MT8189_DISP_RDMA0_SEL_IN 0xe04
++	#define MT8189_SEL_IN_DISP_RDMA0_FROM_DISP_RSZ0_MOUT (0)
++	#define MT8189_SEL_IN_DISP_RDMA0_FROM_DISP_OVL0_OUT0_MOUT (1)
++#define MT8189_DISP_RDMA_SEL_IN_MASK 0x1
++
++#define MT8189_DISP_RDMA1_RSZ1_SOUT_SEL 0xe08
++	#define MT8189_SOUT_DISP_RDMA1_RSZ1_TO_OVL_PQ_OUT_CROSSBAR4 (0)
++	#define MT8189_SOUT_DISP_RDMA1_RSZ1_TO_DISP_COLOR1 (1)
++
++#define MT8189_DISP_RDMA1_SEL_IN 0xe0c
++	#define MT8189_SEL_IN_DISP_RDMA1_FROM_DISP_RSZ1_MOUT (0)
++	#define MT8189_SEL_IN_DISP_RDMA1_FROM_DISP_OVL1_OUT0_MOUT (1)
++
++#define MT8189_DISP_OVL0_BGCLR_MOUT_EN 0xe24
++	#define MT8189_MOUT_OVL_TO_BLENDOUT BIT(0)
++	#define MT8189_MOUT_OVL_TO_BG BIT(1)
++
++#define MT8189_DISP_OVL1_BGCLR_MOUT_EN 0xe28
++#define MT8189_DISP_OVL_BGCLR_MOUT_MASK 0x3
++
++static const struct mtk_mmsys_routes mmsys_mt8189_routing_table[] = {
++	/* main path */
++	MMSYS_ROUTE(OVL, 0, RDMA, 0,
++		    MT8189_DISP_OVL0_BGCLR_MOUT_EN, MT8189_DISP_OVL_BGCLR_MOUT_MASK,
++		    MT8189_MOUT_OVL_TO_BLENDOUT),
++	MMSYS_ROUTE(OVL, 0, RDMA, 0,
++		    MT8189_DISP_OVL0_OUT0_MOUT_EN, MT8189_DISP_OVL_OUT0_MOUT_MASK,
++		    MT8189_MOUT_DISP_OVL0_TO_DISP_RDMA0),
++	MMSYS_ROUTE(OVL, 0, RDMA, 0,
++		    MT8189_DISP_RDMA0_SEL_IN, MT8189_DISP_RDMA_SEL_IN_MASK,
++		    MT8189_SEL_IN_DISP_RDMA0_FROM_DISP_OVL0_OUT0_MOUT),
++	MMSYS_ROUTE(RDMA, 0, COMP0_OUT_CB, 4,
++		    MT8189_DISP_RDMA0_RSZ0_SOUT_SEL, MT8189_OVL_PQ_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_SOUT_DISP_RDMA0_RSZ0_TO_OVL_PQ_OUT_CROSSBAR1),
++	MMSYS_ROUTE(RDMA, 0, COMP0_OUT_CB, 4,
++		    MT8189_OVL_PQ_OUT_CROSSBAR1_MOUT_EN, MT8189_OVL_PQ_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_MOUT_OVL_PQ_OUT_CROSSBAR1_TO_COMP_OUT_CROSSBAR4),
++	MMSYS_ROUTE(COMP0_OUT_CB, 4, DVO, 0,
++		    MT8189_COMP_OUT_CROSSBAR4_MOUT_EN, MT8189_COMP_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_MOUT_COMP_OUT_CROSSBAR4_TO_DISP_DVO0),
++	/* ext path */
++	MMSYS_ROUTE(OVL, 1, RDMA, 1,
++		    MT8189_DISP_OVL1_BGCLR_MOUT_EN, MT8189_DISP_OVL_BGCLR_MOUT_MASK,
++		    MT8189_MOUT_OVL_TO_BLENDOUT),
++	MMSYS_ROUTE(OVL, 1, RDMA, 1,
++		    MT8189_DISP_OVL1_OUT0_MOUT_EN, MT8189_DISP_OVL_OUT0_MOUT_MASK,
++		    MT8189_MOUT_DISP_OVL1_TO_DISP_RDMA1),
++	MMSYS_ROUTE(OVL, 1, RDMA, 1,
++		    MT8189_DISP_RDMA1_SEL_IN, MT8189_DISP_RDMA_SEL_IN_MASK,
++		    MT8189_SEL_IN_DISP_RDMA1_FROM_DISP_OVL1_OUT0_MOUT),
++	MMSYS_ROUTE(RDMA, 1, COMP0_OUT_CB, 5,
++		    MT8189_DISP_RDMA1_RSZ1_SOUT_SEL, MT8189_OVL_PQ_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_SOUT_DISP_RDMA1_RSZ1_TO_OVL_PQ_OUT_CROSSBAR4),
++	MMSYS_ROUTE(RDMA, 1, COMP0_OUT_CB, 5,
++		    MT8189_OVL_PQ_OUT_CROSSBAR4_MOUT_EN, MT8189_OVL_PQ_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_MOUT_OVL_PQ_OUT_CROSSBAR4_TO_COMP_OUT_CROSSBAR5),
++	MMSYS_ROUTE(COMP0_OUT_CB, 5, DVO, 1,
++		    MT8189_COMP_OUT_CROSSBAR5_MOUT_EN, MT8189_COMP_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_DVO1),
++	MMSYS_ROUTE(COMP0_OUT_CB, 5, DSI, 0,
++		    MT8189_COMP_OUT_CROSSBAR5_MOUT_EN, MT8189_COMP_OUT_CROSSBAR_MOUT_MASK,
++		    MT8189_MOUT_COMP_OUT_CROSSBAR5_TO_DISP_DSI0),
++};
++
++static const struct mtk_mmsys_default mmsys_mt8189_disp0_default_table[] = {
++	{MT8189_MMSYS_GCE_EVENT_SEL, MT8189_EVENT_GCE_EN, GENMASK(1, 0)},
++};
++
++#endif /* __SOC_MEDIATEK_MT8189_MMSYS_H */
+diff --git a/drivers/soc/mediatek/mtk-mmsys.c b/drivers/soc/mediatek/mtk-mmsys.c
+index 2f3e0778b..ac710b610 100644
+--- a/drivers/soc/mediatek/mtk-mmsys.c
++++ b/drivers/soc/mediatek/mtk-mmsys.c
+@@ -19,6 +19,7 @@
+ #include "mt8183-mmsys.h"
+ #include "mt8186-mmsys.h"
+ #include "mt8188-mmsys.h"
++#include "mt8189-mmsys.h"
+ #include "mt8192-mmsys.h"
+ #include "mt8195-mmsys.h"
+ #include "mt8365-mmsys.h"
+@@ -112,6 +113,16 @@ static const struct mtk_mmsys_driver_data mt8188_vppsys1_driver_data = {
+ 	.is_vppsys = true,
+ };
+ 
++static const struct mtk_mmsys_driver_data mt8189_mmsys_driver_data = {
++	.clk_driver = "clk-mt8189-mmsys",
++	.routes = mmsys_mt8189_routing_table,
++	.num_routes = ARRAY_SIZE(mmsys_mt8189_routing_table),
++	.def_config = mmsys_mt8189_disp0_default_table,
++	.num_def_config = ARRAY_SIZE(mmsys_mt8189_disp0_default_table),
++	.sw0_rst_offset = MT8189_MMSYS_SW0_RST_B,
++	.num_resets = 32,
++};
++
+ static const struct mtk_mmsys_driver_data mt8192_mmsys_driver_data = {
+ 	.clk_driver = "clk-mt8192-mm",
+ 	.routes = mmsys_mt8192_routing_table,
+@@ -280,6 +291,18 @@ void mtk_mmsys_ddp_dpi_fmt_config(struct device *dev, u32 val)
+ }
+ EXPORT_SYMBOL_GPL(mtk_mmsys_ddp_dpi_fmt_config);
+ 
++void mtk_mmsys_default_config(struct device *dev)
++{
++	struct mtk_mmsys *mmsys = dev_get_drvdata(dev);
++	const struct mtk_mmsys_default *def_config = mmsys->data->def_config;
++	int i;
++
++	for (i = 0; i < mmsys->data->num_def_config; i++)
++		mtk_mmsys_update_bits(mmsys, def_config[i].offset, def_config[i].mask,
++				      def_config[i].val, NULL);
++}
++EXPORT_SYMBOL_GPL(mtk_mmsys_default_config);
++
+ void mtk_mmsys_vpp_rsz_merge_config(struct device *dev, u32 id, bool enable,
+ 				    struct cmdq_pkt *cmdq_pkt)
+ {
+@@ -471,6 +494,7 @@ static const struct of_device_id of_match_mtk_mmsys[] = {
+ 	{ .compatible = "mediatek,mt8188-vdosys1", .data = &mt8188_vdosys1_driver_data },
+ 	{ .compatible = "mediatek,mt8188-vppsys0", .data = &mt8188_vppsys0_driver_data },
+ 	{ .compatible = "mediatek,mt8188-vppsys1", .data = &mt8188_vppsys1_driver_data },
++	{ .compatible = "mediatek,mt8189-mmsys", .data = &mt8189_mmsys_driver_data },
+ 	{ .compatible = "mediatek,mt8192-mmsys", .data = &mt8192_mmsys_driver_data },
+ 	/* "mediatek,mt8195-mmsys" compatible is deprecated */
+ 	{ .compatible = "mediatek,mt8195-mmsys", .data = &mt8195_vdosys0_driver_data },
+diff --git a/drivers/soc/mediatek/mtk-mmsys.h b/drivers/soc/mediatek/mtk-mmsys.h
+index c51a5e334..fe276a521 100644
+--- a/drivers/soc/mediatek/mtk-mmsys.h
++++ b/drivers/soc/mediatek/mtk-mmsys.h
+@@ -109,6 +109,12 @@ struct mtk_mmsys_routes {
+ 	u32 val;
+ };
+ 
++struct mtk_mmsys_default {
++	u32 offset;
++	u32 val;
++	u32 mask;
++};
++
+ /**
+  * struct mtk_mmsys_driver_data - Settings of the mmsys
+  * @clk_driver: Clock driver name that the mmsys is using
+@@ -116,6 +122,9 @@ struct mtk_mmsys_routes {
+  * @routes: Routing table of the mmsys.
+  *          It provides mux settings from one module to another.
+  * @num_routes: Array size of the routes.
++ * @def_config: Default register settings applied when a display pipe is
++ *              brought up (see mtk_mmsys_default_config()).
++ * @num_def_config: Array size of def_config.
+  * @sw0_rst_offset: Register offset for the reset control.
+  * @num_resets: Number of reset bits that are defined
+  * @is_vppsys: Whether the mmsys is VPPSYS (Video Processing Pipe)
+@@ -141,6 +150,8 @@ struct mtk_mmsys_driver_data {
+ 	const char *clk_driver;
+ 	const struct mtk_mmsys_routes *routes;
+ 	const unsigned int num_routes;
++	const struct mtk_mmsys_default *def_config;
++	const unsigned int num_def_config;
+ 	const u16 sw0_rst_offset;
+ 	const u8 *rst_tb;
+ 	const u32 num_resets;
+diff --git a/drivers/soc/mediatek/mtk-mutex.c b/drivers/soc/mediatek/mtk-mutex.c
+index eb5d381ff..0455f4d2d 100644
+--- a/drivers/soc/mediatek/mtk-mutex.c
++++ b/drivers/soc/mediatek/mtk-mutex.c
+@@ -177,6 +177,48 @@
+ #define MT8188_MUTEX_MOD_DISP1_DPI1		38
+ #define MT8188_MUTEX_MOD_DISP1_DP_INTF1		39
+ 
++#define MT8189_DISP_MUTEX0_MOD0			0x30
++#define MT8189_DISP_MUTEX0_MOD1			0x34
++#define MT8189_DISP_MUTEX0_SOF			0x2C
++#define MT8189_MUTEX_MOD_DISP_OVL0		0
++#define MT8189_MUTEX_MOD_DISP_OVL1		1
++#define MT8189_MUTEX_MOD_DISP_RSZ0		2
++#define MT8189_MUTEX_MOD_DISP_RSZ1		3
++#define MT8189_MUTEX_MOD_DISP_RDMA0		4
++#define MT8189_MUTEX_MOD_DISP_RDMA1		5
++#define MT8189_MUTEX_MOD_DISP_COLOR0		6
++#define MT8189_MUTEX_MOD_DISP_COLOR1		4
++#define MT8189_MUTEX_MOD_DISP_CCORR0		8
++#define MT8189_MUTEX_MOD_DISP_CCORR1		9
++#define MT8189_MUTEX_MOD_DISP_CCORR2		10
++#define MT8189_MUTEX_MOD_DISP_CCORR3		11
++#define MT8189_MUTEX_MOD_DISP_AAL0		12
++#define MT8189_MUTEX_MOD_DISP_AAL1		13
++#define MT8189_MUTEX_MOD_DISP_GAMMA0		14
++#define MT8189_MUTEX_MOD_DISP_GAMMA1		15
++#define MT8189_MUTEX_MOD_DISP_DITHER0		16
++#define MT8189_MUTEX_MOD_DISP_DITHER1		17
++#define MT8189_MUTEX_MOD_DISP_VPP_MERGE0	18
++#define MT8189_MUTEX_MOD_DISP_DSC_WRAP0_CORE0	19
++#define MT8189_MUTEX_MOD_DISP_DSC_WRAP0_CORE1	20
++#define MT8189_MUTEX_MOD_DISP_DVO0		21
++#define MT8189_MUTEX_MOD_DISP_DSI0		22
++#define MT8189_MUTEX_MOD_DISP_DVO1		23
++#define MT8189_MUTEX_MOD_DISP_DPI0		24
++#define MT8189_MUTEX_MOD_DISP_WDMA0		25
++#define MT8189_MUTEX_MOD_DISP_WDMA1		26
++#define MT8189_MUTEX_MOD_DISP_PWM0		27
++#define MT8189_MUTEX_MOD_DISP_PWM1		28
++#define MT8189_MUTEX_MOD_ALL			0xff
++
++#define MT8189_MUTEX_SOF_SINGLE_MODE		0
++#define MT8189_MUTEX_SOF_DSI0			1
++#define MT8189_MUTEX_EOF_DSI0			(MT8189_MUTEX_SOF_DSI0 << 7)
++#define MT8189_MUTEX_SOF_DVO			5
++#define MT8189_MUTEX_EOF_DVO			(MT8189_MUTEX_SOF_DVO << 7)
++#define MT8189_MUTEX_SOF_DPTX			6
++#define MT8189_MUTEX_EOF_DPTX			(MT8189_MUTEX_SOF_DPTX << 7)
++
+ #define MT8195_MUTEX_MOD_DISP_OVL0		0
+ #define MT8195_MUTEX_MOD_DISP_WDMA0		1
+ #define MT8195_MUTEX_MOD_DISP_RDMA0		2
+@@ -345,6 +387,7 @@ enum mtk_mutex_sof_id {
+ 	MUTEX_SOF_DSI3,
+ 	MUTEX_SOF_DP_INTF0,
+ 	MUTEX_SOF_DP_INTF1,
++	MUTEX_SOF_DVO0,
+ 	DDP_MUTEX_SOF_MAX,
+ };
+ 
+@@ -356,6 +399,7 @@ struct mtk_mutex_data {
+ 	const u16 mutex_mod1_reg;
+ 	const u16 mutex_sof_reg;
+ 	const bool no_clk;
++	const bool need_sof_mod;
+ };
+ 
+ struct mtk_mutex_ctx {
+@@ -554,6 +598,33 @@ static const u8 mt8188_mdp_mutex_table_mod[MUTEX_MOD_IDX_MAX] = {
+ 	[MUTEX_MOD_IDX_MDP_WROT3] = MT8195_MUTEX_MOD_MDP_WROT3,
+ };
+ 
++static const u8 mt8189_mutex_mod[DDP_COMPONENT_ID_MAX] = {
++	[DDP_COMPONENT_OVL0] = MT8189_MUTEX_MOD_DISP_OVL0,
++	[DDP_COMPONENT_OVL1] = MT8189_MUTEX_MOD_DISP_OVL1,
++	[DDP_COMPONENT_RSZ0] = MT8189_MUTEX_MOD_DISP_RSZ0,
++	[DDP_COMPONENT_RSZ1] = MT8189_MUTEX_MOD_DISP_RSZ1,
++	[DDP_COMPONENT_RDMA0] = MT8189_MUTEX_MOD_DISP_RDMA0,
++	[DDP_COMPONENT_RDMA1] = MT8189_MUTEX_MOD_DISP_RDMA1,
++	[DDP_COMPONENT_COLOR0] = MT8189_MUTEX_MOD_DISP_COLOR0,
++	[DDP_COMPONENT_COLOR1] = MT8189_MUTEX_MOD_DISP_COLOR1,
++	[DDP_COMPONENT_CCORR0] = MT8189_MUTEX_MOD_DISP_CCORR0,
++	[DDP_COMPONENT_CCORR1] = MT8189_MUTEX_MOD_DISP_CCORR1,
++	[DDP_COMPONENT_AAL0] = MT8189_MUTEX_MOD_DISP_AAL0,
++	[DDP_COMPONENT_AAL1] = MT8189_MUTEX_MOD_DISP_AAL1,
++	[DDP_COMPONENT_GAMMA] = MT8189_MUTEX_MOD_DISP_GAMMA0,
++	[DDP_COMPONENT_DITHER0] = MT8189_MUTEX_MOD_DISP_DITHER0,
++	[DDP_COMPONENT_DITHER1] = MT8189_MUTEX_MOD_DISP_DITHER1,
++	[DDP_COMPONENT_MERGE0] = MT8189_MUTEX_MOD_DISP_VPP_MERGE0,
++	[DDP_COMPONENT_DSC0] = MT8189_MUTEX_MOD_DISP_DSC_WRAP0_CORE0,
++	[DDP_COMPONENT_DVO0] = MT8189_MUTEX_MOD_DISP_DVO0,
++	[DDP_COMPONENT_DVO1] = MT8189_MUTEX_MOD_DISP_DVO1,
++	[DDP_COMPONENT_DSI0] = MT8189_MUTEX_MOD_DISP_DSI0,
++	[DDP_COMPONENT_WDMA0] = MT8189_MUTEX_MOD_DISP_WDMA0,
++	[DDP_COMPONENT_PWM0] = MT8189_MUTEX_MOD_DISP_PWM0,
++	[DDP_COMPONENT_COMP0_OUT_CB4] = MT8189_MUTEX_MOD_ALL,
++	[DDP_COMPONENT_COMP0_OUT_CB5] = MT8189_MUTEX_MOD_ALL,
++};
++
+ static const u8 mt8192_mutex_mod[DDP_COMPONENT_ID_MAX] = {
+ 	[DDP_COMPONENT_AAL0] = MT8192_MUTEX_MOD_DISP_AAL0,
+ 	[DDP_COMPONENT_CCORR] = MT8192_MUTEX_MOD_DISP_CCORR0,
+@@ -718,6 +789,16 @@ static const u16 mt8188_mutex_sof[DDP_MUTEX_SOF_MAX] = {
+ 		MT8188_MUTEX_SOF_DP_INTF1 | MT8188_MUTEX_EOF_DP_INTF1,
+ };
+ 
++static const u16 mt8189_mutex_sof[DDP_MUTEX_SOF_MAX] = {
++	[MUTEX_SOF_SINGLE_MODE] = MT8189_MUTEX_SOF_SINGLE_MODE,
++	[MUTEX_SOF_DSI0] =
++		MT8189_MUTEX_SOF_DSI0 | MT8189_MUTEX_EOF_DSI0,
++	[MUTEX_SOF_DVO0] =
++		MT8189_MUTEX_SOF_DVO | MT8189_MUTEX_EOF_DVO,
++	[MUTEX_SOF_DP_INTF0] =
++		MT8189_MUTEX_SOF_DPTX | MT8189_MUTEX_EOF_DPTX,
++};
++
+ static const u16 mt8195_mutex_sof[DDP_MUTEX_SOF_MAX] = {
+ 	[MUTEX_SOF_SINGLE_MODE] = MUTEX_SOF_SINGLE_MODE,
+ 	[MUTEX_SOF_DSI0] = MT8195_MUTEX_SOF_DSI0 | MT8195_MUTEX_EOF_DSI0,
+@@ -812,6 +893,15 @@ static const struct mtk_mutex_data mt8188_vpp_mutex_driver_data = {
+ 	.mutex_table_mod = mt8188_mdp_mutex_table_mod,
+ };
+ 
++static const struct mtk_mutex_data mt8189_mutex_driver_data = {
++	.mutex_mod = mt8189_mutex_mod,
++	.mutex_sof = mt8189_mutex_sof,
++	.mutex_mod_reg = MT8189_DISP_MUTEX0_MOD0,
++	.mutex_mod1_reg = MT8189_DISP_MUTEX0_MOD1,
++	.mutex_sof_reg = MT8189_DISP_MUTEX0_SOF,
++	.need_sof_mod = true,
++};
++
+ static const struct mtk_mutex_data mt8192_mutex_driver_data = {
+ 	.mutex_mod = mt8192_mutex_mod,
+ 	.mutex_sof = mt8183_mutex_sof,
+@@ -893,8 +983,9 @@ void mtk_mutex_add_comp(struct mtk_mutex *mutex,
+ 	struct mtk_mutex_ctx *mtx = container_of(mutex, struct mtk_mutex_ctx,
+ 						 mutex[mutex->id]);
+ 	unsigned int reg;
+-	unsigned int sof_id, mod_id;
++	unsigned int sof_id = MUTEX_SOF_SINGLE_MODE, mod_id;
+ 	unsigned int offset;
++	bool is_output_comp = true;
+ 
+ 	WARN_ON(&mtx->mutex[mutex->id] != mutex);
+ 
+@@ -918,23 +1009,33 @@ void mtk_mutex_add_comp(struct mtk_mutex *mutex,
+ 		sof_id = MUTEX_SOF_DPI1;
+ 		break;
+ 	case DDP_COMPONENT_DP_INTF0:
++	case DDP_COMPONENT_DVO1:
+ 		sof_id = MUTEX_SOF_DP_INTF0;
+ 		break;
+ 	case DDP_COMPONENT_DP_INTF1:
+ 		sof_id = MUTEX_SOF_DP_INTF1;
+ 		break;
++	case DDP_COMPONENT_DVO0:
++		sof_id = MUTEX_SOF_DVO0;
++		break;
+ 	default:
++		is_output_comp = false;
++		break;
++	}
++
++	/* Some SoCs (e.g. MT8189) also need the output engine in the MOD mask */
++	if (!is_output_comp || mtx->data->need_sof_mod) {
+ 		offset = DISP_REG_MUTEX_MOD(mtx, mtx->data->mutex_mod[id], mutex->id);
+ 		mod_id = mtx->data->mutex_mod[id] % 32;
+ 		reg = readl_relaxed(mtx->regs + offset);
+ 		reg |= BIT(mod_id);
+ 		writel_relaxed(reg, mtx->regs + offset);
+-		return;
+ 	}
+ 
+-	writel_relaxed(mtx->data->mutex_sof[sof_id],
+-		       mtx->regs +
+-		       DISP_REG_MUTEX_SOF(mtx->data->mutex_sof_reg, mutex->id));
++	if (is_output_comp)
++		writel_relaxed(mtx->data->mutex_sof[sof_id],
++			       mtx->regs +
++			       DISP_REG_MUTEX_SOF(mtx->data->mutex_sof_reg, mutex->id));
+ }
+ EXPORT_SYMBOL_GPL(mtk_mutex_add_comp);
+ 
+@@ -946,6 +1047,7 @@ void mtk_mutex_remove_comp(struct mtk_mutex *mutex,
+ 	unsigned int reg;
+ 	unsigned int mod_id;
+ 	unsigned int offset;
++	bool is_output_comp;
+ 
+ 	WARN_ON(&mtx->mutex[mutex->id] != mutex);
+ 
+@@ -958,18 +1060,25 @@ void mtk_mutex_remove_comp(struct mtk_mutex *mutex,
+ 	case DDP_COMPONENT_DPI1:
+ 	case DDP_COMPONENT_DP_INTF0:
+ 	case DDP_COMPONENT_DP_INTF1:
++	case DDP_COMPONENT_DVO0:
++	case DDP_COMPONENT_DVO1:
++		is_output_comp = true;
+ 		writel_relaxed(MUTEX_SOF_SINGLE_MODE,
+ 			       mtx->regs +
+ 			       DISP_REG_MUTEX_SOF(mtx->data->mutex_sof_reg,
+ 						  mutex->id));
+ 		break;
+ 	default:
++		is_output_comp = false;
++		break;
++	}
++
++	if (!is_output_comp || mtx->data->need_sof_mod) {
+ 		offset = DISP_REG_MUTEX_MOD(mtx, mtx->data->mutex_mod[id], mutex->id);
+ 		mod_id = mtx->data->mutex_mod[id] % 32;
+ 		reg = readl_relaxed(mtx->regs + offset);
+ 		reg &= ~BIT(mod_id);
+ 		writel_relaxed(reg, mtx->regs + offset);
+-		break;
+ 	}
+ }
+ EXPORT_SYMBOL_GPL(mtk_mutex_remove_comp);
+@@ -1141,6 +1250,7 @@ static const struct of_device_id mutex_driver_dt_match[] = {
+ 	{ .compatible = "mediatek,mt8186-mdp3-mutex", .data = &mt8186_mdp_mutex_driver_data },
+ 	{ .compatible = "mediatek,mt8188-disp-mutex", .data = &mt8188_mutex_driver_data },
+ 	{ .compatible = "mediatek,mt8188-vpp-mutex",  .data = &mt8188_vpp_mutex_driver_data },
++	{ .compatible = "mediatek,mt8189-disp-mutex", .data = &mt8189_mutex_driver_data },
+ 	{ .compatible = "mediatek,mt8192-disp-mutex", .data = &mt8192_mutex_driver_data },
+ 	{ .compatible = "mediatek,mt8195-disp-mutex", .data = &mt8195_mutex_driver_data },
+ 	{ .compatible = "mediatek,mt8195-vpp-mutex",  .data = &mt8195_vpp_mutex_driver_data },
+diff --git a/include/dt-bindings/clock/mediatek,mt8189-clk.h b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+index fe37441e9..7836a68f3 100644
+--- a/include/dt-bindings/clock/mediatek,mt8189-clk.h
++++ b/include/dt-bindings/clock/mediatek,mt8189-clk.h
+@@ -433,4 +433,53 @@
+ /* MFGCFG */
+ #define CLK_MFG_BG3D					0
+ 
++/* MMSYS (dispsys) */
++#define CLK_MM_DISP_OVL0_4L				0
++#define CLK_MM_DISP_OVL1_4L				1
++#define CLK_MM_VPP_RSZ0					2
++#define CLK_MM_VPP_RSZ1					3
++#define CLK_MM_DISP_RDMA0				4
++#define CLK_MM_DISP_RDMA1				5
++#define CLK_MM_DISP_COLOR0				6
++#define CLK_MM_DISP_COLOR1				7
++#define CLK_MM_DISP_CCORR0				8
++#define CLK_MM_DISP_CCORR1				9
++#define CLK_MM_DISP_CCORR2				10
++#define CLK_MM_DISP_CCORR3				11
++#define CLK_MM_DISP_AAL0				12
++#define CLK_MM_DISP_AAL1				13
++#define CLK_MM_DISP_GAMMA0				14
++#define CLK_MM_DISP_GAMMA1				15
++#define CLK_MM_DISP_DITHER0				16
++#define CLK_MM_DISP_DITHER1				17
++#define CLK_MM_DISP_DSC_WRAP0				18
++#define CLK_MM_VPP_MERGE0				19
++#define CLK_MMSYS_0_DISP_DVO				20
++#define CLK_MMSYS_0_DISP_DSI0				21
++#define CLK_MM_DP_INTF0					22
++#define CLK_MM_DPI0					23
++#define CLK_MM_DISP_WDMA0				24
++#define CLK_MM_DISP_WDMA1				25
++#define CLK_MM_DISP_FAKE_ENG0				26
++#define CLK_MM_DISP_FAKE_ENG1				27
++#define CLK_MM_SMI_LARB					28
++#define CLK_MM_DISP_MUTEX0				29
++#define CLK_MM_DIPSYS_CONFIG				30
++#define CLK_MM_DUMMY					31
++#define CLK_MMSYS_1_DISP_DSI0				32
++#define CLK_MMSYS_1_LVDS_ENCODER			33
++#define CLK_MMSYS_1_DPI0				34
++#define CLK_MMSYS_1_DISP_DVO				35
++#define CLK_MM_DP_INTF					36
++#define CLK_MMSYS_1_LVDS_ENCODER_CTS			37
++#define CLK_MMSYS_1_DISP_DVO_AVT			38
++#define CLK_MM_NR_CLK					39
++
++/* MMINFRA_CONFIG */
++#define CLK_MMINFRA_GCE_D				0
++#define CLK_MMINFRA_GCE_M				1
++#define CLK_MMINFRA_SMI					2
++#define CLK_MMINFRA_GCE_26M				3
++#define CLK_MMINFRA_CONFIG_NR_CLK			4
++
+ #endif /* _DT_BINDINGS_CLK_MT8189_H */
+diff --git a/include/linux/soc/mediatek/mtk-mmsys.h b/include/linux/soc/mediatek/mtk-mmsys.h
+index 4885b065b..67343a78f 100644
+--- a/include/linux/soc/mediatek/mtk-mmsys.h
++++ b/include/linux/soc/mediatek/mtk-mmsys.h
+@@ -25,6 +25,8 @@ enum mtk_ddp_comp_id {
+ 	DDP_COMPONENT_AAL1,
+ 	DDP_COMPONENT_BLS,
+ 	DDP_COMPONENT_CCORR,
++	DDP_COMPONENT_CCORR0 = DDP_COMPONENT_CCORR,
++	DDP_COMPONENT_CCORR1,
+ 	DDP_COMPONENT_COLOR0,
+ 	DDP_COMPONENT_COLOR1,
+ 	DDP_COMPONENT_DITHER0,
+@@ -39,6 +41,8 @@ enum mtk_ddp_comp_id {
+ 	DDP_COMPONENT_DSI1,
+ 	DDP_COMPONENT_DSI2,
+ 	DDP_COMPONENT_DSI3,
++	DDP_COMPONENT_DVO0,
++	DDP_COMPONENT_DVO1,
+ 	DDP_COMPONENT_ETHDR_MIXER,
+ 	DDP_COMPONENT_GAMMA,
+ 	DDP_COMPONENT_MDP_RDMA0,
+@@ -81,6 +85,10 @@ enum mtk_ddp_comp_id {
+ 	DDP_COMPONENT_UFOE,
+ 	DDP_COMPONENT_WDMA0,
+ 	DDP_COMPONENT_WDMA1,
++	DDP_COMPONENT_RSZ0,
++	DDP_COMPONENT_RSZ1,
++	DDP_COMPONENT_COMP0_OUT_CB4,
++	DDP_COMPONENT_COMP0_OUT_CB5,
+ 	DDP_COMPONENT_ID_MAX,
+ };
+ 
+@@ -94,6 +102,8 @@ void mtk_mmsys_ddp_disconnect(struct device *dev,
+ 
+ void mtk_mmsys_ddp_dpi_fmt_config(struct device *dev, u32 val);
+ 
++void mtk_mmsys_default_config(struct device *dev);
++
+ void mtk_mmsys_merge_async_config(struct device *dev, int idx, int width,
+ 				  int height, struct cmdq_pkt *cmdq_pkt);
+ 

@@ -46,6 +46,38 @@ k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), 
 # Internal storage (UFS) and a GPU test with Omarchy's own Mesa: ROOT-C mounted read-only *without journal replay*
 # (noload), so the test kernel never writes to the real install.
 i=0; while [ ! -b /dev/sda7 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
+
+# Hang-proof log: quigon.blklog=<4 KiB block in sda7> names a preallocated 4 MiB file on Omarchy's root
+# (/var/lib/quigon/mainline-blklog, one extent; mainline-log prints it). blk <step> writes the step name and the
+# current kernel log there and flushes it, so a hard freeze that wipes pstore still leaves the last step on disk.
+# Written only if the region holds zeros or an earlier QBLK header, so a stale offset can't hit filesystem data.
+blkoff=$(sed -n 's/.*quigon\.blklog=\([0-9]*\).*/\1/p' /proc/cmdline); blkseq=0
+blk() {
+  [ -n "$blkoff" ] && [ -b /dev/sda7 ] || return 0
+  head=$(dd if=/dev/sda7 bs=4096 skip=$blkoff count=1 2>/dev/null | head -c 4 | tr -d '\0')
+  [ -z "$head" ] || [ "$head" = QBLK ] || { k "blklog: region not empty/QBLK ('$head'), not writing"; blkoff=; return 0; }
+  blkseq=$((blkseq+1))
+  { echo "QBLK seq=$blkseq step=$* uptime=$(cut -d' ' -f1 /proc/uptime)"; dmesg; } > /tmp/blk
+  truncate -s 4194304 /tmp/blk
+  dd if=/tmp/blk of=/dev/sda7 bs=4096 seek=$blkoff count=1024 conv=notrunc,fsync 2>/dev/null
+}
+blk "start"
+
+# Display drivers as modules, one at a time, each step logged to disk first (the built-in display froze the SoC).
+for m in mtk-mmsys mtk-mutex drm_dma_helper phy-mtk-edp mtk_dp mediatek-drm; do
+  [ -f /lib/modules/$m.ko ] || continue
+  blk "before insmod $m"; k "display: insmod $m"
+  insmod /lib/modules/$m.ko dyndbg=+p; k "display: insmod $m -> $? : $(dmesg | tail -4 | tr '\n' ';' | cut -c1-500)"
+  sleep 2; blk "2 s after insmod $m"
+done
+if [ -f /lib/modules/mediatek-drm.ko ]; then
+  sleep 3; blk "display modules loaded"
+  for c in /sys/class/drm/card*-*; do [ -e "$c/status" ] && k "display: $(basename $c) status=$(cat $c/status) enabled=$(cat $c/enabled) dpms=$(cat $c/dpms 2>/dev/null) modes=[$(tr '\n' ' ' < $c/modes)]"; done
+  for f in /sys/kernel/debug/dri/*/state; do grep -q mediatek "${f%/state}/name" 2>/dev/null || continue
+    k "display: drm state: $(grep -E 'crtc\[|plane\[|connector\[|active=|enable=|mode:|fb=|crtc=|size=' $f | tr -s ' \t' ' ' | tr '\n' ';' | cut -c1-950)"; done
+  k "display: backlight $(cat /sys/class/backlight/*/bl_power /sys/class/backlight/*/actual_brightness 2>/dev/null | tr '\n' ' ')"
+  k "display: after modules: $(dmesg | grep -i -E 'mediatek-drm|mtk-dp|mtk_dp|edp|dvo|mmsys|mutex|panel|fbcon|drm' | grep -v -i panfrost | tail -14 | tr '\n' ';' | cut -c1-950)"
+fi
 k "ufs: $(dmesg | grep -i -E 'ufs|scsi|sd[a-z]' | tail -8 | tr '\n' ';' | cut -c1-900)"
 k "partitions: $(awk 'NR>2{printf "%s(%s) ", $4, $3}' /proc/partitions | cut -c1-500)"
 if [ -b /dev/sda7 ] && mount -t ext4 -o ro,noload /dev/sda7 /mnt 2>/tmp/mnt.err; then
@@ -103,5 +135,5 @@ while [ $stay -gt 0 ] && [ ! -e /tmp/reboot-now ]; do
   sleep 5; stay=$((stay-5))
   [ -e /tmp/stay-more ] && { rm -f /tmp/stay-more; stay=$((stay+1200)); }
 done
-k "rebooting"
+k "rebooting"; blk "rebooting (clean end)"
 sync; reboot -f
