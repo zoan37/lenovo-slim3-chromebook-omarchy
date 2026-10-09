@@ -1,0 +1,127 @@
+#!/bin/bash
+# quigon-doctor — check (and repair where safe) everything custom on this Chromebook port after updates.
+#   quigon-doctor               full check (run as the desktop user or root; repairs need root)
+#   quigon-doctor --fix         full check, repairing what it can
+#   quigon-doctor --post-update quick non-session checks + repairs, notify on problems (pacman hook)
+#   quigon-doctor --guard-pacman restore pacman.conf/mirrorlist if they lost Arch Linux ARM (path unit)
+set -u
+MODE=${1:-check}
+FIX=0; [[ $MODE == --fix || $MODE == --post-update || $MODE == --guard-pacman ]] && FIX=1
+(( EUID == 0 )) || FIX=0
+ok=0; bad=0; fixed=0; problems=()
+pass() { echo "  ✓ $*"; ok=$((ok+1)); }
+fail() { echo "  ✗ $*"; bad=$((bad+1)); problems+=("$*"); }
+repaired() { echo "  ↻ $*"; fixed=$((fixed+1)); }
+section() { echo; echo "$*"; }
+desk_user() { local u; u=$(systemctl list-units --no-legend 'quigon-desktop@*.service' 2>/dev/null | sed -n 's/.*quigon-desktop@\([^.]*\)\.service.*/\1/p' | head -1); echo "${u:-$(id -nu 1001 2>/dev/null)}"; }
+notify_user() {
+  local title=$1 body=$2 u uid
+  u=$(desk_user); uid=$(id -u "$u" 2>/dev/null) || return 0
+  [[ -S /run/user/$uid/bus ]] || return 0
+  if (( EUID == 0 )); then
+    runuser -u "$u" -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus notify-send -u critical -a "quigon-doctor" "$title" "$body" 2>/dev/null
+  else
+    notify-send -u critical -a "quigon-doctor" "$title" "$body" 2>/dev/null
+  fi
+}
+
+check_pacman() {
+  section "Package config"
+  local good=/etc/quigon/pacman.conf.good goodm=/etc/quigon/mirrorlist.good
+  if grep -q '^\[alarm\]' /etc/pacman.conf && grep -q '^\[omarchy\]' /etc/pacman.conf && grep -q 'pkgs.omarchy.org/edge' /etc/pacman.conf; then
+    pass "pacman.conf has Arch Linux ARM + Omarchy edge repos"
+  elif (( FIX )) && [[ -f $good ]]; then
+    cp -f /etc/pacman.conf "/etc/quigon/pacman.conf.replaced-$(date +%Y%m%d%H%M%S)"; cp -f "$good" /etc/pacman.conf
+    repaired "pacman.conf lost the Arch Linux ARM repos; restored the known-good copy (replaced one saved in /etc/quigon)"
+    notify_user "Package config restored" "Something replaced /etc/pacman.conf without the Arch Linux ARM repos (likely an Omarchy x86 refresh). The working copy was restored."
+  else
+    fail "pacman.conf lacks [alarm]/[omarchy] edge (restore: sudo cp $good /etc/pacman.conf)"
+  fi
+  if grep -q 'archlinuxarm.org' /etc/pacman.d/mirrorlist; then
+    pass "mirrorlist points at Arch Linux ARM"
+  elif (( FIX )) && [[ -f $goodm ]]; then
+    cp -f /etc/pacman.d/mirrorlist "/etc/quigon/mirrorlist.replaced-$(date +%Y%m%d%H%M%S)"; cp -f "$goodm" /etc/pacman.d/mirrorlist
+    repaired "mirrorlist restored to Arch Linux ARM"
+    notify_user "Mirror list restored" "Something replaced /etc/pacman.d/mirrorlist with non-ARM mirrors. The working copy was restored."
+  else
+    fail "mirrorlist has no archlinuxarm.org mirror (restore: sudo cp $goodm /etc/pacman.d/mirrorlist)"
+  fi
+}
+
+check_system() {
+  section "Boot and kernel"
+  local kver; kver=$(uname -r)
+  [[ -d /usr/lib/modules/$kver ]] && pass "modules for running kernel $kver present" || fail "no /usr/lib/modules/$kver (ChromeOS modules missing)"
+  if [[ $(findmnt -no SOURCE /) == /dev/sda7 ]]; then
+    local a; a=$(quigon-cgpt show -i 6 -A /dev/sda 2>/dev/null)
+    [[ -n $a ]] && [[ $(quigon-cgpt show -i 6 -S /dev/sda) == 1 ]] && pass "KERN-C marked successful (priority $(quigon-cgpt show -i 6 -P /dev/sda))" || fail "KERN-C not marked successful"
+  else
+    pass "running from $(findmnt -no SOURCE /) (not the internal disk)"
+  fi
+  for u in seatd quigon-gpu-guard quigon-gpu-confirm.timer quigon-boot-good NetworkManager; do
+    systemctl is-enabled -q "$u" 2>/dev/null && pass "$u enabled" || fail "$u not enabled"
+  done
+  [[ -f /etc/systemd/system/seatd.service.d/novt.conf ]] && pass "seatd SEATD_VTBOUND=0 drop-in" || fail "seatd no-VT drop-in missing"
+  [[ -f /etc/systemd/logind.conf.d/30-quigon-lock-key.conf ]] && pass "lock key doesn't suspend (logind drop-in)" || fail "logind lock-key drop-in missing"
+  swapon --show=NAME --noheadings | grep -q zram && pass "zram swap active" || fail "zram swap not active"
+
+  section "GPU"
+  if [[ -f /etc/quigon/gpu.env ]]; then pass "GPU mode on (/etc/quigon/gpu.env)"; else
+    [[ -f /etc/quigon/gpu.env.disabled-unstable ]] && fail "GPU mode turned off by the boot guard (quigon-gpu on)" || fail "GPU mode off"; fi
+  local f
+  for f in /opt/quigon-gpu/mali/lib/libmali.so.0.54.1.relr /opt/quigon-gpu/lib/egl-mali-shim.so /opt/quigon-gpu/chrome-lib/libEGL.so.1 \
+           /opt/quigon-gpu/mali/lib/libminigbm.so.1.0.0.relr /opt/quigon-gpu/lib/ghostty-gpu-preload.so \
+           /opt/quigon-gpu/vulkan/layer/libVkLayer_window_system_integration.so /opt/quigon-gpu/mesa-zink/lib/libgallium-26.2.4.so; do
+    [[ -e $f ]] && pass "$(basename "$f")" || fail "missing $f"
+  done
+  [[ -L /etc/vulkan/icd.d/quigon_mali_icd.json && -L /etc/vulkan/implicit_layer.d/quigon_wsi_layer.json ]] && pass "Mali Vulkan ICD + WSI layer registered" || fail "Mali Vulkan ICD/WSI layer not registered"
+  pacman -Q libc++ >/dev/null 2>&1 && pass "libc++ installed (libmali needs it)" || fail "libc++ not installed (pacman -S libc++ libc++abi)"
+  [[ -f /etc/systemd/user/wayland-wm@hyprland.desktop.service.d/10-quigon-gpu.conf ]] && pass "compositor GPU drop-in" || fail "compositor GPU drop-in missing"
+
+  section "Audio"
+  pacman -Q alsa-card-profiles pipewire-pulse >/dev/null 2>&1 && pass "alsa-card-profiles + pipewire-pulse installed" || fail "alsa-card-profiles or pipewire-pulse missing"
+  [[ -f /usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/HiFi.conf ]] && pass "UCM2 profile for mt8189_1019_rt5682s" || fail "UCM2 profile missing (port/quigon/root/usr/share/alsa/ucm2)"
+
+  section "Omarchy patches"
+  if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
+  elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
+  else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi
+}
+
+check_session() {
+  local u uid home; u=$(desk_user); uid=$(id -u "$u" 2>/dev/null) || return 0; home=$(getent passwd "$u" | cut -d: -f6)
+  section "Desktop session ($u)"
+  local p; p=$(pgrep -x Hyprland | head -1)
+  if [[ -n $p ]]; then
+    grep -q libmali /proc/$p/maps 2>/dev/null && pass "Hyprland is rendering on the Mali" || fail "Hyprland is running on llvmpipe"
+  else fail "Hyprland is not running"; fi
+  pgrep -x quickshell >/dev/null && pass "Omarchy bar (quickshell) running" || fail "Omarchy bar not running (omarchy-restart-shell)"
+  local d
+  for d in google-chrome.desktop:quigon-chrome com.mitchellh.ghostty.desktop:quigon-ghostty grok-bot.desktop:quigon-electron; do
+    grep -q "Exec=/usr/local/bin/${d#*:}" "$home/.local/share/applications/${d%%:*}" 2>/dev/null && pass "${d%%:*} → ${d#*:}" || fail "${d%%:*} override missing (GPU wrapper not used)"
+  done
+  grep -q "quigon: Chromebook top row" "$home/.config/hypr/bindings.lua" 2>/dev/null && pass "top-row key binds in bindings.lua" || fail "top-row key binds missing (omarchy refresh hyprland?) — see port/quigon/user/hypr-bindings-quigon.lua"
+  grep -q "quigon-gpu-notify" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "GPU fallback notification in autostart.lua" || fail "quigon-gpu-notify missing from autostart.lua"
+  grep -q "hyprpm reload" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "hyprpm reload in autostart.lua" || fail "hyprpm reload missing from autostart.lua"
+  local sig plugins
+  sig=$(ls -t /run/user/$uid/hypr 2>/dev/null | head -1)
+  plugins=$(runuser -u "$u" -- env XDG_RUNTIME_DIR=/run/user/$uid HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl plugin list 2>/dev/null)
+  [[ $plugins == *momentum* ]] && pass "hypr-momentum loaded" || fail "hypr-momentum not loaded (after a Hyprland update run 'hyprpm update' in a terminal)"
+  # hypr-tab-drag hooks Hyprland functions, which fails on aarch64 ("could not hook the compositor functions"): not a failure here.
+  [[ $plugins == *tab-drag* || $plugins == *tab_drag* ]] && pass "hypr-tab-drag loaded" || echo "  · hypr-tab-drag not loaded (known: its function hooks don't work on ARM)"
+  local sinks; sinks=$(runuser -u "$u" -- env XDG_RUNTIME_DIR=/run/user/$uid wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p')
+  [[ $sinks == *Speaker* ]] && pass "speaker sink present" || fail "no speaker sink (systemctl --user restart wireplumber pipewire pipewire-pulse)"
+}
+
+case $MODE in
+  --guard-pacman) check_pacman >/dev/null; exit 0 ;;
+  --post-update) check_pacman; check_system ;;
+  *) check_pacman; check_system; check_session ;;
+esac
+
+echo
+echo "quigon-doctor: $ok ok, $fixed repaired, $bad problem(s)$( (( EUID != 0 && bad > 0 )) && echo ' — run with sudo --fix to repair what can be repaired')"
+if [[ $MODE == --post-update ]] && (( bad > 0 )); then
+  notify_user "After the update: $bad issue(s) on this Chromebook" "$(printf '%s\n' "${problems[@]}" | head -4) — run 'quigon-doctor' in a terminal for details."
+fi
+(( bad == 0 ))

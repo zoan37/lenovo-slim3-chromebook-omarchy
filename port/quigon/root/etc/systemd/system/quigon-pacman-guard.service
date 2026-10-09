@@ -1,0 +1,6 @@
+[Unit]
+Description=Restore pacman.conf/mirrorlist if they lost Arch Linux ARM
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/quigon-doctor --guard-pacman

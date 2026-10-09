@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch pacman.conf/mirrorlist for being replaced with non-ARM versions
+
+[Path]
+PathChanged=/etc/pacman.conf
+PathChanged=/etc/pacman.d/mirrorlist
+
+[Install]
+WantedBy=multi-user.target

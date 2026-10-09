@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Checking this Chromebook's custom setup (quigon-doctor)...
+When = PostTransaction
+Exec = /usr/local/bin/quigon-doctor --post-update
