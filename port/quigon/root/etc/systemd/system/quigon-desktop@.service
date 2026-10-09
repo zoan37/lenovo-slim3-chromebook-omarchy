@@ -1,0 +1,20 @@
+[Unit]
+Description=Omarchy on the built-in display for %i (no VT on the ChromeOS kernel)
+Requires=seatd.service
+After=seatd.service systemd-user-sessions.service
+Conflicts=quigon-desktop.service
+
+[Service]
+User=%i
+# A logind session for the user (account + session PAM phases only), so uwsm and the
+# user manager see a normal login.
+PAMName=login
+# No VT: put the session on seat0 directly (pam_systemd reads these), so uwsm's env preloader
+# finds XDG_SEAT/XDG_SESSION_ID and skips its foreground-VT lookup (/sys/class/tty/tty0/active).
+Environment=XDG_SEAT=seat0 XDG_SESSION_TYPE=wayland XDG_SESSION_CLASS=user
+ExecStart=/usr/local/bin/quigon-omarchy
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
