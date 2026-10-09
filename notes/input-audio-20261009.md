@@ -77,6 +77,12 @@ and GPU devfreq. SoC ~40–42 °C at light load.
   image processor.
 - Software cost is small anyway: ffmpeg 1080p30 10 s clip, 8 threads — VP9 3.6 CPU-s (≈0.36 core), H.264 4.2 CPU-s.
   Packages left installed (`libva-v4l2_request-avd`, `libva-utils`, `v4l-utils`) are harmless; nothing sets them up.
+- **YouTube baseline, software decode (2026-10-09):** Chrome, "2020 LG OLED l The Black 4K HDR 60fps" (njX2bu-_Vw4) in an
+  802×451 player. YouTube chose `vp09.00.51.08` itag 302 = **VP9 720p60** (VP9, not AV1, so the hardware decoder could
+  take it). Over 30 s (part of which may have been paused): renderer 117% of a core (one renderer at 105%, the
+  software VP9 decoder), GPU process 31% (libmali compositing), whole system 190% of 800%. Stats for nerds over 35.8 s
+  of video: 2260 frames (~63 fps), 4 dropped. Smooth, but costs ~1.2+ cores. 1080p60 would be ~2.25× the pixels.
+  Power not measured (on the charger, battery full).
 - Possible later: GStreamer's `v4l2codecs` (gst-plugins-bad) handles MM21, for GStreamer-based players only.
 
 ## Quick hardware checks (2026-10-09)
