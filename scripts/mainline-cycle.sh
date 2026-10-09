@@ -10,7 +10,13 @@ BH=${QUIGON_BUILD_HOST:?set QUIGON_BUILD_HOST=user@build-host}; CB=${QUIGON_HOST
 scp -q "$M"/mt8189-quigon*.dts "$M/mt8189-pinfunc.h" "$BH:quigon-kernel/linux-next/arch/arm64/boot/dts/mediatek/"
 [[ -n ${RECONFIG:-} ]] && { scp -q "$here/mainline-config.sh" "$BH:quigon-kernel/"; ssh "$BH" 'cd ~/quigon-kernel && ./mainline-config.sh linux-next build-s1 initramfs'; }
 scp -q "$M/init-stage1.sh" "$BH:quigon-kernel/initramfs/init"
-ssh "$BH" 'chmod 755 ~/quigon-kernel/initramfs/init && cd ~/quigon-kernel && make -s -j20 ARCH=arm64 O=$HOME/quigon-kernel/build-s1 -C linux-next Image mediatek/mt8189-quigon.dtb mediatek/mt8189-quigon-nopcie.dtb > build-s1.log 2>&1 || { grep -E "error|Error" build-s1.log | head -20; exit 1; }'
+ssh "$BH" 'set -e; chmod 755 ~/quigon-kernel/initramfs/init; cd ~/quigon-kernel; : > build-s1.log
+  mk() { make -s -j20 ARCH=arm64 O=$HOME/quigon-kernel/build-s1 -C linux-next "$@" >> build-s1.log 2>&1 || { grep -E "error|Error" build-s1.log | head -20; exit 1; }; }
+  # two passes: kernel, then the modules /init loads (in-tree, against that vmlinux), copied into the initramfs,
+  # then the Image again so it embeds them
+  mk Image; mk drivers/pci/controller/pcie-mediatek-gen3.ko
+  mkdir -p initramfs/lib/modules; cp build-s1/drivers/pci/controller/pcie-mediatek-gen3.ko initramfs/lib/modules/
+  mk Image mediatek/mt8189-quigon.dtb mediatek/mt8189-quigon-nopcie.dtb'
 L=$(mktemp -d); trap 'rm -rf "$L"' EXIT
 mkdir -p "$L/arch/arm64/boot/dts/mediatek"
 scp -q "$BH:quigon-kernel/build-s1/arch/arm64/boot/Image" "$L/arch/arm64/boot/"

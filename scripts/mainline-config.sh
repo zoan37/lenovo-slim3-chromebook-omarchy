@@ -3,7 +3,8 @@
 #   arm64 defconfig trimmed to MediaTek (the image must stay near ChromeOS's ~33 MB uncompressed: depthcharge
 #   decompresses into a fixed buffer), plus everything stage 1 needs built in: MT8189 clocks/pinctrl/power domains,
 #   watchdog, pstore/ramoops console, embedded (xz) initramfs, lockup/hang panics with a 5 s panic timeout, PCIe +
-#   MT7921E Wi-Fi.
+#   MT7921E Wi-Fi. The PCIe controller driver is a module, loaded by /init under a timeout (its probe froze the SoC
+#   when built in), and copied into the initramfs by mainline-cycle.sh.
 set -euo pipefail
 src=$(realpath "$1"); out=$(realpath -m "$2"); ird=$(realpath "$3"); shift 3
 mkdir -p "$out"
@@ -34,7 +35,7 @@ S -e COMMON_CLK_MT8189 -e COMMON_CLK_MT8189_BUS -e COMMON_CLK_MT8189_DBGAO -e CO
   -d SPI_FSL_DSPI -d NET_DSA -d BRIDGE -d NETFILTER -d CRYPTO_DEV_CCREE -d REMOTEPROC -d RPMSG -d PCI_ENDPOINT \
   -d ACPI -d ATA -d MTD -d EFI -d NFS_COMMON -d ROOT_NFS -d FTRACE -d KPROBES -d PROFILING -d DEBUG_FS_ALLOW_ALL \
   -e WLAN -e WLAN_VENDOR_MEDIATEK -e CFG80211 -e MAC80211 -e MT7921E -e RFKILL \
-  -e PCIE_MEDIATEK_GEN3 -e PHY_MTK_TPHY -e PCI -e PCIEPORTBUS \
+  -m PCIE_MEDIATEK_GEN3 -e PHY_MTK_TPHY -e PCI -e PCIEPORTBUS -e MODULES -e DYNAMIC_DEBUG -e MAGIC_SYSRQ \
   -e RD_XZ -e INITRAMFS_COMPRESSION_XZ -d INITRAMFS_COMPRESSION_GZIP \
   --set-str LOCALVERSION "-quigon" -d LOCALVERSION_AUTO
 make -C "$src" -s ARCH=arm64 O="$out" "$@" olddefconfig

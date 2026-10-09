@@ -87,6 +87,11 @@
 };
 
 &pciephy {
+	/*
+	 * ChromeOS (MediaTek's tree, which works on this board) uses the v2 T-PHY register layout for MT8189; the
+	 * Genio series' mt8189.dtsi says v3. With v3 the PCIe bring-up froze the SoC hard (no watchdog reset).
+	 */
+	compatible = "mediatek,mt8189-tphy", "mediatek,generic-tphy-v2";
 	status = "okay";
 };
 

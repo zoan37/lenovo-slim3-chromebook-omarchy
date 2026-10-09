@@ -31,6 +31,23 @@ k "regulators: $(ls /sys/class/regulator | wc -l): $(cat /sys/class/regulator/*/
 k "pci: $(for d in /sys/bus/pci/devices/*; do [ -e "$d" ] && echo -n "$(basename "$d") $(cat "$d/vendor"):$(cat "$d/device"); "; done)"
 k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), pm domains: $(grep -c . /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null)"
 
+# PCIe controller: loaded here under a timeout, with the driver's debug messages on. If the probe doesn't return,
+# record where every CPU is and stop feeding the watchdog: the reset keeps pstore (a power-off wouldn't).
+if [ -f /lib/modules/pcie-mediatek-gen3.ko ]; then
+  echo 9 > /proc/sys/kernel/printk
+  k "pcie: insmod start"
+  insmod /lib/modules/pcie-mediatek-gen3.ko dyndbg=+p &
+  ip=$!
+  i=0; while kill -0 $ip 2>/dev/null && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
+  if kill -0 $ip 2>/dev/null; then
+    k "pcie: insmod STUCK after 15 s; insmod stack: $(tr '\n' ';' < /proc/$ip/stack 2>/dev/null)"
+    echo l > /proc/sysrq-trigger; sleep 1; echo w > /proc/sysrq-trigger; sleep 1
+    k "pcie: stopping the watchdog feeder -> reset in ~31 s"
+    sync; killall -9 watchdog; sleep 120
+  fi
+  k "pcie: insmod returned after $i s: $(dmesg | grep -i -E 'mtk-pcie|pcie|tphy' | tail -8 | tr '\n' ';' | cut -c1-900)"
+fi
+
 stay=20
 i=0; while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
 if [ -d /sys/class/net/wlan0 ] && [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
