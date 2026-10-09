@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/* Bring-up variant: mt8189-quigon-nopcie plus the internal display (eDP panel, backlight) and the EC (keyboard,
+ * battery), touchpad and touchscreen. */
+#include "mt8189-quigon-nopcie.dts"
+#include "mt8189-quigon-display.dtsi"
+#include "mt8189-quigon-input.dtsi"

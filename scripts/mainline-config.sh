@@ -3,7 +3,7 @@
 #   arm64 defconfig trimmed to MediaTek (the image must stay near ChromeOS's ~33 MB uncompressed: depthcharge
 #   decompresses into a fixed buffer), plus everything stage 1 needs built in: MT8189 clocks/pinctrl/power domains,
 #   watchdog, pstore/ramoops console, embedded (xz) initramfs, lockup/hang panics with a 5 s panic timeout, PCIe +
-#   Panfrost + the MT8189 GPU clock (stage 3); Wi-Fi off while PCIe is parked. The PCIe controller driver is a module, loaded by /init under a timeout (its probe froze the SoC
+#   Panfrost + the MT8189 GPU clock (stage 3); display: mediatek DRM, eDP, panel-edp, PWM backlight, fbcon (stage 4); EC keyboard/battery, touchpad, touchscreen (stage 5); Wi-Fi off while PCIe is parked. The PCIe controller driver is a module, loaded by /init under a timeout (its probe froze the SoC
 #   when built in), and copied into the initramfs by mainline-cycle.sh.
 set -euo pipefail
 src=$(realpath "$1"); out=$(realpath -m "$2"); ird=$(realpath "$3"); shift 3
@@ -30,15 +30,20 @@ S -e COMMON_CLK_MT8189 -e COMMON_CLK_MT8189_BUS -e COMMON_CLK_MT8189_DBGAO -e CO
   -e DRM -e DRM_PANFROST -e COMMON_CLK_MT8189_MFG -e PM_DEVFREQ -e DEVFREQ_GOV_SIMPLE_ONDEMAND -e REGULATOR_COUPLER -e ARM_MEDIATEK_CPUFREQ_HW -e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
   -d DRM_NOUVEAU -d DRM_RADEON -d DRM_AMDGPU -d DRM_MSM -d DRM_TEGRA -d DRM_ETNAVIV -d DRM_LIMA -d DRM_PANTHOR -d DRM_V3D \
   -d DRM_VC4 -d DRM_ROCKCHIP -d DRM_EXYNOS -d DRM_SUN4I -d DRM_MESON -d DRM_IMX -d DRM_RCAR_DU -d DRM_HISI_HIBMC -d DRM_HISI_KIRIN \
-  -d DRM_I2C_ADV7511 -d DRM_DISPLAY_CONNECTOR -d DRM_LONTIUM_LT9611 -d DRM_SIMPLE_BRIDGE -d DRM_PANEL_SIMPLE -d DRM_PANEL_EDP \
+  -d DRM_I2C_ADV7511 -d DRM_DISPLAY_CONNECTOR -d DRM_LONTIUM_LT9611 -d DRM_SIMPLE_BRIDGE -d DRM_PANEL_SIMPLE \
   -d SOUND -d MEDIA_SUPPORT -d BT -d NFC -d CAN -d INFINIBAND -d MD -d SCSI_LOWLEVEL \
-  -d VIRTUALIZATION -d KVM -d XEN -d STAGING -d CHROME_PLATFORMS -d SURFACE_PLATFORMS -d FB \
+  -d VIRTUALIZATION -d KVM -d XEN -d STAGING -d SURFACE_PLATFORMS \
   -d ETHERNET -d USB_NET_DRIVERS -d WIRELESS_WAN -d IEEE802154 -d WAN -d ATM -d HAMRADIO -d MDIO_DEVICE \
   -d BTRFS_FS -d XFS_FS -d NFS_FS -d NFSD -d CEPH_FS -d CIFS -d 9P_FS -d F2FS_FS -d SQUASHFS -d OVERLAY_FS \
   -d IIO -d HWMON -d INPUT_TOUCHSCREEN -d INPUT_JOYSTICK -d INPUT_TABLET -d RC_CORE -d USB_GADGET -d TYPEC \
   -d SPI_FSL_DSPI -d NET_DSA -d BRIDGE -d NETFILTER -d CRYPTO_DEV_CCREE -d REMOTEPROC -d RPMSG -d PCI_ENDPOINT \
   -d ACPI -d ATA -d MTD -d EFI -d NFS_COMMON -d ROOT_NFS -d FTRACE -d KPROBES -d PROFILING -d DEBUG_FS_ALLOW_ALL \
   -d MT7921E -d MAC80211 -d CFG80211 -d WLAN \
+  -e COMMON_CLK_MT8189_MMSYS -e MTK_CMDQ -e MTK_MMSYS -e DRM_MEDIATEK -e DRM_MEDIATEK_DP -e PHY_MTK_EDP -d DRM_MEDIATEK_HDMI \
+  -e DRM_PANEL_EDP -e DRM_DISPLAY_DP_AUX_BUS -e PWM -e PWM_MTK_DISP -e BACKLIGHT_CLASS_DEVICE -e BACKLIGHT_PWM \
+  -e FB -e DRM_FBDEV_EMULATION -e FRAMEBUFFER_CONSOLE \
+  -e CHROME_PLATFORMS -e CROS_EC -e CROS_EC_SPI -e KEYBOARD_CROS_EC -e I2C_CROS_EC_TUNNEL -e BATTERY_SBS \
+  -e SPI -e SPI_MT65XX -e I2C_MT65XX -e INPUT_EVDEV -e MOUSE_ELAN_I2C -e MOUSE_ELAN_I2C_I2C -e HID -e I2C_HID_OF_ELAN \
   -m PCIE_MEDIATEK_GEN3 -e PHY_MTK_TPHY -e PCI -e PCIEPORTBUS -e MODULES -e DYNAMIC_DEBUG -e MAGIC_SYSRQ \
   -e RD_XZ -e INITRAMFS_COMPRESSION_XZ -d INITRAMFS_COMPRESSION_GZIP \
   --set-str LOCALVERSION "-quigon" -d LOCALVERSION_AUTO

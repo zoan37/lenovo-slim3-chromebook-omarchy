@@ -35,6 +35,12 @@ k "gpu: pm domains: $(grep -E 'mfg' /sys/kernel/debug/pm_genpd/pm_genpd_summary 
 k "cpufreq: $(for p in /sys/devices/system/cpu/cpufreq/policy*; do echo -n "$(basename $p) $(cat $p/scaling_governor 2>/dev/null) cur=$(cat $p/scaling_cur_freq 2>/dev/null) max=$(cat $p/cpuinfo_max_freq 2>/dev/null); "; done)"
 k "gpu: regulators: $(for r in /sys/class/regulator/*; do n=$(cat $r/name 2>/dev/null); case $n in buck_vgpu|ldo_sram_gpu|vproc1|vsram_proc1) echo -n "$n=$(cat $r/microvolts 2>/dev/null)uV/$(cat $r/state 2>/dev/null) ";; esac; done)"
 k "pci: $(for d in /sys/bus/pci/devices/*; do [ -e "$d" ] && echo -n "$(basename "$d") $(cat "$d/vendor"):$(cat "$d/device"); "; done)"
+k "display: $(dmesg | grep -i -E 'mediatek-drm|mtk-dp|mtk_dp|edp|dvo|mmsys|disp|panel|backlight|fbcon|drm' | grep -v -i panfrost | tail -16 | tr '\n' ';' | cut -c1-950)"
+k "display: connectors: $(for c in /sys/class/drm/card*-*; do [ -e "$c/status" ] && echo -n "$(basename $c)=$(cat $c/status)/$(cat $c/enabled 2>/dev/null) modes=[$(tr '\n' ' ' < $c/modes)] "; done) fb=[$(cat /sys/class/graphics/fb0/name /sys/class/graphics/fb0/virtual_size 2>/dev/null | tr '\n' ' ')] backlight=[$(for b in /sys/class/backlight/*; do [ -e "$b" ] && echo -n "$(basename $b) $(cat $b/actual_brightness)/$(cat $b/max_brightness) "; done)]"
+k "display: pm domains: $(grep -E 'disp|mm-infra|edp' /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null | tr -s ' ' | tr '\n' ';')"
+k "display: clocks: $(grep -E ' (mm_disp_ovl0_4l|mm_disp_rdma0|mmsys_0_disp_dvo|mmsys_1_disp_dvo|edp_sel|disp0_sel|tvdpll2) ' /sys/kernel/debug/clk/clk_summary 2>/dev/null | tr -s ' ' | cut -c1-80 | tr '\n' ';')"
+k "input: $(grep '^N:' /proc/bus/input/devices | cut -d'"' -f2 | tr '\n' ';') ec: $(dmesg | grep -i -E 'cros-ec|cros_ec|elan|i2c_hid|spi-mt65xx|mtk-spi' | tail -6 | tr '\n' ';' | cut -c1-600)"
+k "battery: $(for b in /sys/class/power_supply/*; do [ -e "$b" ] && echo -n "$(basename $b) $(cat $b/status 2>/dev/null) $(cat $b/capacity 2>/dev/null)% "; done)"
 k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), pm domains: $(grep -c . /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null)"
 
 # Internal storage (UFS) and a GPU test with Omarchy's own Mesa: ROOT-C mounted read-only *without journal replay*
@@ -73,6 +79,11 @@ if [ -f /lib/modules/pcie-mediatek-gen3.ko ]; then
 fi
 
 stay=20
+# With a working display, say hello on it and stay up a minute so it can be seen.
+if [ -e /dev/fb0 ]; then
+  printf '\n\n  quigon: mainline %s on the internal display (Panfrost GPU, fbcon)\n\n' "$(uname -r)" > /dev/tty1 2>/dev/null
+  k "display: fb0 present, wrote a banner to tty1"; stay=60
+fi
 i=0; while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
 if [ -d /sys/class/net/wlan0 ] && [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
   ip link set lo up

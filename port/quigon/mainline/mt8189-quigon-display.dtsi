@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Internal display for quigon: OVL0 -> RDMA0 -> (mmsys crossbar) -> DVO0 -> eDP TX -> eDP panel (aux-bus), PWM
+ * backlight. Nodes and board wiring from ChromeOS's mt8189.dtsi and mt8189-skywalker.dtsi; the mt8189.dtsi of the
+ * Genio series has no display yet. The ChromeOS nodes' GCE (CMDQ) references are left out: without mboxes the DRM
+ * driver writes the registers from the CPU.
+ *
+ * No IOMMU yet: mainline's mtk_iommu waits for every SMI larb it lists, and most of them (camera, codecs) have no
+ * clock driver here. The display DMA ports stay in physical mode (as the firmware leaves them) and scanout buffers
+ * come from CMA.
+ */
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pinctrl-names = "default";
+		pinctrl-0 = <&backlight_en_pins>;
+		pwms = <&disp_pwm0 0 500000>;
+		power-supply = <&ppvar_sys>;
+		enable-gpios = <&pio 13 GPIO_ACTIVE_HIGH>;
+		brightness-levels = <0 1023>;
+		num-interpolated-steps = <1023>;
+		default-brightness-level = <576>;
+		post-pwm-on-delay-ms = <1>;
+	};
+
+	/* system-wide semi-regulated rail from the battery or USB */
+	ppvar_sys: regulator-ppvar-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "ppvar_sys";
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* eDP panel power: GPIO 25 (ChromeOS takes it from pp3300_z1, which the EC keeps on) */
+	pp3300_edp_x: regulator-pp3300-edp-x {
+		compatible = "regulator-fixed";
+		regulator-name = "pp3300_edp_x";
+		regulator-boot-on;
+		off-on-delay-us = <500000>;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		gpio = <&pio 25 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&edp_pwr_pins>;
+	};
+
+	soc {
+		disp_pwm0: pwm@1100e000 {
+			compatible = "mediatek,mt8189-disp-pwm", "mediatek,mt8183-disp-pwm";
+			reg = <0 0x1100e000 0 0x1000>;
+			clocks = <&peri_ao CLK_PERAO_DISP_PWM0>,
+				 <&topckgen CLK_TOP_DISP_PWM_SEL>;
+			clock-names = "main", "mm";
+			interrupts = <GIC_SPI 471 IRQ_TYPE_LEVEL_HIGH 0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&disp_pwm0_pins>;
+			#pwm-cells = <2>;
+		};
+
+		edp_tx: edp-tx@11b70000 {
+			compatible = "mediatek,mt8189-edp-tx";
+			reg = <0 0x11b70000 0 0x14000>,
+			      <0 0x11e10000 0 0x1500>;
+			interrupts = <GIC_SPI 380 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_EDP_TX_DORMANT>;
+			clocks = <&topckgen CLK_TOP_EDP_SEL>;
+			clock-names = "power";
+			pinctrl-names = "default";
+			pinctrl-0 = <&edp_hpd_pins>;
+			max-lane-count = <4>;
+			max-linkrate-mhz = <5400>;
+			/* obiwan */
+			swing-level = <3>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					edp_in: endpoint {
+						remote-endpoint = <&disp_dvo0_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					edp_out: endpoint {
+						data-lanes = <0 1 2 3>;
+						remote-endpoint = <&edp_panel_in>;
+					};
+				};
+			};
+
+			aux-bus {
+				panel: panel {
+					compatible = "edp-panel";
+					power-supply = <&pp3300_edp_x>;
+					backlight = <&backlight>;
+
+					port {
+						edp_panel_in: endpoint {
+							remote-endpoint = <&edp_out>;
+						};
+					};
+				};
+			};
+		};
+
+		/* MMSYS config: routing crossbar, resets, and (through clk-mt8189-mmsys) the display clock gates */
+		mmsys: syscon@14000000 {
+			compatible = "mediatek,mt8189-mmsys", "syscon";
+			reg = <0 0x14000000 0 0x1000>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		disp_mutex0: mutex@14001000 {
+			compatible = "mediatek,mt8189-disp-mutex";
+			reg = <0 0x14001000 0 0x1000>;
+			interrupts = <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DISP_MUTEX0>;
+		};
+
+		disp_ovl0: ovl@14002000 {
+			compatible = "mediatek,mt8189-disp-ovl";
+			reg = <0 0x14002000 0 0x1000>;
+			interrupts = <GIC_SPI 302 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DISP_OVL0_4L>;
+		};
+
+		disp_rdma0: rdma@14006000 {
+			compatible = "mediatek,mt8189-disp-rdma";
+			reg = <0 0x14006000 0 0x1000>;
+			interrupts = <GIC_SPI 308 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DISP_RDMA0>;
+		};
+
+		disp_dvo0: dvo@14017000 {
+			compatible = "mediatek,mt8189-edp-dvo";
+			reg = <0 0x14017000 0 0x1000>;
+			interrupts = <GIC_SPI 325 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MMSYS_1_DISP_DVO>,
+				 <&topckgen CLK_TOP_EDP_SEL>,
+				 <&apmixedsys CLK_APMIXED_TVDPLL2>,
+				 <&clk26m>,
+				 <&mmsys CLK_MMSYS_0_DISP_DVO>;
+			clock-names = "engine", "pixel", "pll", "dvo_clk", "hf_fdvo_clk";
+
+			port {
+				disp_dvo0_out: endpoint {
+					remote-endpoint = <&edp_in>;
+				};
+			};
+		};
+
+		/* multimedia infra clock gates (SMI, GCE); MM_INFRA is on whenever the display is */
+		mminfra: clock-controller@1e800000 {
+			compatible = "mediatek,mt8189-mm-infra";
+			reg = <0 0x1e800000 0 0x1000>;
+			#clock-cells = <1>;
+		};
+	};
+};
+
+&pio {
+	/* ChromeOS skywalker */
+	backlight_en_pins: backlight-en-pins {
+		pins-en {
+			pinmux = <PINMUX_GPIO13__FUNC_GPIO13>;
+			output-low;
+		};
+	};
+
+	disp_pwm0_pins: disp-pwm0-pins {
+		pins-disp-pwm0 {
+			pinmux = <PINMUX_GPIO29__FUNC_DISP_PWM0>;
+		};
+	};
+
+	edp_hpd_pins: edp-hpd-pins {
+		pins-hpd {
+			pinmux = <PINMUX_GPIO28__FUNC_EDP_TX_HPD>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	edp_pwr_pins: edp-pwr-pins {
+		pins-pwr {
+			pinmux = <PINMUX_GPIO25__FUNC_GPIO25>;
+		};
+	};
+};
+
+/*
+ * Display power domains: MM_INFRA > DISP, and the eDP TX. Only the basic (topckgen) clocks: the bus-protection
+ * subsys clocks ChromeOS lists (mminfra SMI, mmsys SMI larb) come from controllers that themselves sit in these
+ * domains, and mtk-pm-domains gets every domain's clocks at probe, so referencing them would defer the whole
+ * power controller (GPU included).
+ */
+&spm {
+	power-domain@MT8189_POWER_DOMAIN_MM_INFRA {
+		reg = <MT8189_POWER_DOMAIN_MM_INFRA>;
+		clocks = <&topckgen CLK_TOP_MMINFRA_SEL>;
+		clock-names = "mm_infra";
+		mediatek,infracfg = <&infra_ao>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#power-domain-cells = <1>;
+
+		power-domain@MT8189_POWER_DOMAIN_DISP {
+			reg = <MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&topckgen CLK_TOP_DISP0_SEL>;
+			clock-names = "disp";
+			mediatek,infracfg = <&infra_ao>;
+			#power-domain-cells = <0>;
+		};
+	};
+
+	power-domain@MT8189_POWER_DOMAIN_EDP_TX_DORMANT {
+		reg = <MT8189_POWER_DOMAIN_EDP_TX_DORMANT>;
+		#power-domain-cells = <0>;
+	};
+};

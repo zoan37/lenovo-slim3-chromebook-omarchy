@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * quigon input and battery: ChromeOS EC on SPI0 (keyboard matrix, power button, lid switch, I2C tunnel to the
+ * smart battery), Elan touchpad on I2C7, Parade TC3408 touchscreen on I2C4. Board wiring from ChromeOS's
+ * mt8189-skywalker.dtsi / -obiwan.dts; the keymap and function-row map are copied from the device tree the
+ * firmware hands the ChromeOS kernel on this machine (obiwan with the v3.0 top row).
+ */
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	/* system wide 3.3 V rail, switched by the EC */
+	pp3300_z1: regulator-pp3300-z1 {
+		compatible = "regulator-fixed";
+		regulator-name = "pp3300_z1";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
+	/* 3.3 V rail switched by the PMIC */
+	pp3300_s3: regulator-pp3300-s3 {
+		compatible = "regulator-fixed";
+		regulator-name = "pp3300_s3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&pp3300_z1>;
+	};
+
+	pp1800_trackpad: regulator-pp1800-trackpad {
+		compatible = "regulator-fixed";
+		regulator-name = "pp1800_trackpad";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		enable-active-high;
+		gpio = <&pio 3 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&trackpad_pwr_pins>;
+		vin-supply = <&pp3300_z1>;
+	};
+
+	/* touchscreen "report disable" line, modelled as an active-low regulator like ChromeOS does */
+	pp1800_tchscr_report_disable: regulator-pp1800-tchscr-report-disable {
+		compatible = "regulator-fixed";
+		regulator-name = "pp1800_tchscr_report_disable";
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_pin_report>;
+		gpio = <&pio 14 GPIO_ACTIVE_LOW>;
+	};
+
+	soc {
+		spi0: spi@11010800 {
+			/* ChromeOS: mediatek,mt8189-spi (pad select, enhanced timing, 64-bit DMA, IPM design) */
+			compatible = "mediatek,mt8189-spi", "mediatek,mt6991-spi";
+			reg = <0 0x11010800 0 0x100>;
+			interrupts = <GIC_SPI 459 IRQ_TYPE_LEVEL_HIGH 0>;
+			clocks = <&topckgen CLK_TOP_UNIVPLL_D6_D2>,
+				 <&topckgen CLK_TOP_SPI0_SEL>,
+				 <&peri_ao CLK_PERAO_SPI0_B>,
+				 <&peri_ao CLK_PERAO_SPI0_H>;
+			clock-names = "parent-clk", "sel-clk", "spi-clk", "hclk";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mediatek,pad-select = <0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&spi0_pins>;
+
+			cros_ec: ec@0 {
+				compatible = "google,cros-ec-spi";
+				reg = <0>;
+				interrupts-extended = <&pio 132 IRQ_TYPE_LEVEL_LOW>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&ec_int_pins>;
+				spi-max-frequency = <3000000>;
+				#gpio-cells = <2>;
+				gpio-controller;
+
+				i2c_tunnel: i2c-tunnel {
+					compatible = "google,cros-ec-i2c-tunnel";
+					google,remote-bus = <4>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					battery: sbs-battery@b {
+						compatible = "sbs,sbs-battery";
+						reg = <0xb>;
+						sbs,i2c-retry-count = <2>;
+						sbs,poll-retry-count = <10>;
+					};
+				};
+
+				keyboard-controller {
+					compatible = "google,cros-ec-keyb";
+					keypad,num-rows = <8>;
+					keypad,num-columns = <18>;
+					google,needs-ghost-filter;
+					function-row-physmap = <
+						0x00020000 0x03020000 0x02020000 0x01020000 0x04040000 0x02040000 0x01040000
+						0x020b0000 0x01090000 0x00040000 0x00010000 0x01050000 0x03050000 0x000b0000
+					>;
+					linux,keymap = <
+						0x00010057 0x0002003b 0x00040044 0x000b00b8 0x000c00b9 0x0102003e
+			0x01040041 0x01050058 0x01090043 0x0202003d 0x02040040 0x020b0042
+			0x0302003c 0x030500b7 0x0404003f 0x00030030 0x00050031 0x00060059
+			0x0008000d 0x00090066 0x000a0064 0x001001d0 0x01010001 0x01030022
+			0x01060023 0x01080028 0x010b000e 0x010c005c 0x010e001d 0x0201000f
+			0x02030014 0x0205001b 0x02060015 0x0208001a 0x0209006f 0x020c0068
+			0x0211007c 0x0300007d 0x03010029 0x03030006 0x0304001f 0x0306000c
+			0x03080007 0x0309008e 0x030b002b 0x030c005e 0x030e0061 0x0401001e
+			0x04020020 0x04030021 0x04050025 0x04060024 0x04080027 0x04090026
+			0x040b001c 0x040c006b 0x05010002 0x05020033 0x05030034 0x05040035
+			0x0505002e 0x05060039 0x0507002a 0x0508002d 0x0509002f 0x050b0032
+			0x050c006d 0x0601002c 0x06020004 0x06030005 0x06040003 0x06050009
+			0x0606000b 0x06080008 0x0609000a 0x060b006c 0x060c006a 0x060d0038
+			0x060f0247 0x0611002b 0x07010016 0x07020017 0x07030018 0x07040019
+			0x07050010 0x07060011 0x07070036 0x07080012 0x07090013 0x070b0067
+			0x070c0069 0x07110056 0x0002009e 0x030200ad 0x02020174 0x01020078
+			0x04040063 0x020400e0 0x010400e1 0x020b00e4 0x010900f8 0x00040071
+			0x00010072 0x01050073 0x0305024e 0x000b024a
+					>;
+				};
+			};
+		};
+	};
+};
+
+/* touchscreen (the firmware enables whichever part is fitted; this one has the Parade TC3408) */
+&i2c4 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c4_pins>;
+	status = "okay";
+
+	touchscreen@24 {
+		compatible = "parade,tc3408";
+		reg = <0x24>;
+		interrupts-extended = <&pio 15 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touchscreen_pins>;
+		reset-gpios = <&pio 126 GPIO_ACTIVE_LOW>;
+		vcc33-supply = <&mt6359_vcn33_1_ldo_reg>;
+		vccio-supply = <&pp1800_tchscr_report_disable>;
+	};
+};
+
+/* touchpad: Elan (elan_i2c) */
+&i2c7 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7_pins>;
+	status = "okay";
+
+	trackpad@15 {
+		compatible = "elan,ekth3000";
+		reg = <0x15>;
+		interrupts-extended = <&pio 125 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&trackpad_pins>;
+		vcc-supply = <&pp1800_trackpad>;
+		wakeup-source;
+	};
+};
+
+/* touchscreen 3.3 V */
+&mt6359_vcn33_1_ldo_reg {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&pio {
+	/* ChromeOS skywalker / obiwan */
+	spi0_pins: spi0-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO69__FUNC_SPIM0_CSB>,
+				 <PINMUX_GPIO70__FUNC_SPIM0_CLK>,
+				 <PINMUX_GPIO71__FUNC_SPIM0_MO>,
+				 <PINMUX_GPIO72__FUNC_SPIM0_MI>;
+		};
+	};
+
+	ec_int_pins: ec-int-pins {
+		pins-int {
+			pinmux = <PINMUX_GPIO132__FUNC_GPIO132>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	i2c4_pins: i2c4-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO59__FUNC_SCL4>,
+				 <PINMUX_GPIO60__FUNC_SDA4>;
+			bias-disable;
+		};
+	};
+
+	i2c7_pins: i2c7-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO65__FUNC_SCL7>,
+				 <PINMUX_GPIO66__FUNC_SDA7>;
+			drive-strength = <4>;
+			bias-disable;
+		};
+	};
+
+	touchscreen_pins: touchscreen-pins {
+		pins-int {
+			pinmux = <PINMUX_GPIO15__FUNC_GPIO15>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		pins-reset {
+			pinmux = <PINMUX_GPIO126__FUNC_GPIO126>;
+			output-high;
+		};
+	};
+
+	touch_pin_report: pin-report-pins {
+		pins-touch-en {
+			pinmux = <PINMUX_GPIO14__FUNC_GPIO14>;
+			output-low;
+		};
+	};
+
+	trackpad_pins: trackpad-pins {
+		pins-int {
+			pinmux = <PINMUX_GPIO125__FUNC_GPIO125>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	trackpad_pwr_pins: trackpad-pwr-pins {
+		pins-pwr {
+			pinmux = <PINMUX_GPIO3__FUNC_GPIO3>;
+			output-low;
+		};
+	};
+};
