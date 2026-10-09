@@ -83,6 +83,20 @@ High 1080p60 (B-pyramid) are **bit-exact for all 600 frames**.
 - YouTube in the test profile: `VaapiVideoDecoder` takes the VP9 stream (360p at start, then 720p in that window),
   and the picture is correct.
 
+## Deployed (2026-10-09 morning)
+
+- `scripts/build-libva-v4l2-request.sh` → `/opt/quigon-gpu/va/v4l2_request_drv_video.so` (vainfo: H.264 CB/Main/High,
+  VP9 profile 0); `scripts/build-chrome-lib.sh` → `/opt/quigon-gpu/chrome-lib/libgbm.so.1` = gbm-linear-shim on
+  `libquigon-minigbm.so`; new `quigon-chrome`. quigon-doctor: 49/49.
+- Through the production wrapper (separate profile): VaapiVideoDecoder decodes the 1080p60 VP9 clip, Chrome total
+  0.43 core, and the final `--enable-features` carries both the VA features and chrome-flags.conf's
+  `TouchpadOverscrollHistoryNavigation`.
+- Electron with the new shim: a separate Obsidian instance (`quigon-electron obsidian --user-data-dir=…`) renders on
+  libmali with the shim loaded; no gbm/shared-image errors.
+- The running Chrome picks this up when it's restarted.
+- Regression test: `quigon-test-video-decode` (`scripts/test-video-decode.sh`) encodes 4 s 1080p60 H.264 (B-pyramid)
+  and VP9 clips and compares VA-API vs software frame md5s. 240/240 bit-exact each, ~16 s.
+
 ## Hazards found on the way
 
 - **HEVC can crash the decoder firmware.** After the SCP watchdog restart, the vcodec driver keeps a stale instance
