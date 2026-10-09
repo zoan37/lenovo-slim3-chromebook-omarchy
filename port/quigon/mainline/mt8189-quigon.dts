@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Mainline bring-up device tree for the Lenovo IdeaPad Slim 3 Chromebook (14M8911), ChromeOS board "quigon" on the
+ * "obiwan" baseboard (MT8189 / Kompanio 540). Builds on mt8189.dtsi from Collabora's Genio 520/720-EVK series.
+ *
+ * mt8189-pinfunc.h is ChromeOS's (the mainline pinmux header patch isn't merged yet).
+ *
+ * Stage 1: CPUs, GIC, timer, clocks, pinctrl, power domains, watchdog, PCIe + MT7921 Wi-Fi, MT6359 PMIC (on the pwrap; MT6319 on SPMI for
+ * the big cores isn't described yet, firmware sets it up). No UART is reachable without a SuzyQ cable,
+ * so the console goes to ramoops (pstore), which the firmware describes in /reserved-memory on every boot. The
+ * firmware also fills in /memory (without the BL31 region) and adds /firmware/coreboot.
+ */
+/dts-v1/;
+#include "mt8189.dtsi"
+#include "mt6359.dtsi"
+#include "mt8189-pinfunc.h"
+
+/ {
+	model = "Google Quigon (Lenovo IdeaPad Slim 3 Chromebook)";
+	chassis-type = "laptop";
+	compatible = "google,obiwan", "mediatek,mt8189";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/* Same as ChromeOS: SCP firmware memory and the audio DMA pool. */
+		scp_mem_reserved: memory@50000000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x50000000 0 0x2900000>;
+			no-map;
+		};
+
+		afe_dma_mem_reserved: memory@60000000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x60000000 0 0x300000>;
+			no-map;
+		};
+	};
+
+	soc {
+		watchdog: watchdog@1c00a000 {
+			compatible = "mediatek,mt8189-wdt", "mediatek,mt6589-wdt";
+			reg = <0 0x1c00a000 0 0x1000>;
+			#reset-cells = <1>;
+		};
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&pio {
+	/* ChromeOS skywalker */
+	pcie_pins: pcie-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO48__FUNC_WAKEN>,
+				 <PINMUX_GPIO49__FUNC_PERSTN>,
+				 <PINMUX_GPIO50__FUNC_CLKREQN>;
+			bias-pull-up;
+		};
+	};
+
+	wifi_pins: wifi-pins {
+		pins-wifi-kill {
+			pinmux = <PINMUX_GPIO146__FUNC_GPIO146>;
+			output-high;
+		};
+	};
+};
+
+/* MT7921 (MT7961) Wi-Fi on PCIe */
+&pcie {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie_pins>, <&wifi_pins>;
+	status = "okay";
+};
+
+&pciephy {
+	status = "okay";
+};
+
+&pmic {
+	/* ChromeOS skywalker: PMIC interrupt on GPIO 194 */
+	interrupts-extended = <&pio 194 IRQ_TYPE_LEVEL_HIGH>;
+};
+
