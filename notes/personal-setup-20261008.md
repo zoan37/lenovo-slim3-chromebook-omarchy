@@ -56,3 +56,14 @@ Ported from omarchy-setup (`hyprland-shell-tweaks.md`, `new-machine-checklist.md
   a new rule makes ufw fail to load, `sudo ufw disable` at the keyboard restores the network. A kernel rebuild with
   NF_TABLES (+ those xt modules) would lift all of this.
 
+## SSH key-only (2026-10-09)
+
+- `/etc/ssh/sshd_config.d/10-quigon-keys-only.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`,
+  `PermitRootLogin prohibit-password`. It sorts before Arch's `99-archlinux.conf`, and sshd keeps the first value it reads.
+- Checked before reloading: the laptop's ed25519 key logs in as the desktop user and as root. After the reload, a
+  password-only attempt gets `Permission denied (publickey)` (it was `(publickey,password)` before).
+- Why: ufw allows SSH from `192.168.0.0/24`, and many café/hotel networks use that same range, so the login prompt
+  could be reachable there. With keys only, it's reachable but useless without the key. No `ufw limit` on this kernel
+  (no `xt_recent`), so password guessing wouldn't have been throttled. To add another machine, append its public key
+  to `~/.ssh/authorized_keys` (from a session that already works, or at the keyboard).
+
