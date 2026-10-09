@@ -1,12 +1,20 @@
 #!/bin/bash
-# Omarchy session (uwsm-managed Hyprland, same Exec as Omarchy's omarchy.desktop) directly on mediatek-drm,
-# software rendering until the Mali/kbase path works. Started by quigon-desktop@<user>.service.
+# Omarchy session (uwsm-managed Hyprland, same Exec as Omarchy's omarchy.desktop) directly on mediatek-drm.
+# Started by quigon-desktop@<user>.service.
+#
+# GPU mode (/etc/quigon/gpu.env present): Hyprland renders on the Mali through ChromeOS's libmali (its unit gets
+# gpu.env via a drop-in); apps' Mesa OpenGL goes to Zink on the Mali Vulkan driver (vulkan-wsi-layer provides Wayland
+# presentation). Software mode: everything on llvmpipe, as in the first bring-up.
 set -u
 cd "$HOME"
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export LIBSEAT_BACKEND=seatd SEATD_VTBOUND=0
-export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
 export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
+if [[ -f /etc/quigon/gpu.env ]]; then
+  export MESA_LOADER_DRIVER_OVERRIDE=zink
+else
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GBM_ALWAYS_SOFTWARE=1
+fi
 export XDG_SESSION_TYPE=wayland XDG_SEAT=${XDG_SEAT:-seat0}
 unset WAYLAND_DISPLAY DISPLAY
 [[ -f $HOME/.config/quigon/desktop.env ]] && source "$HOME/.config/quigon/desktop.env"

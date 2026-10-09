@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Make ChromeOS's libmali loadable by upstream glibc (>= 2.36).
+"""Make ChromeOS libraries (libmali, libminigbm, ...) loadable by upstream glibc (>= 2.36).
 
-ChromeOS links libmali with RELR relocations (DT_RELR) but without the GLIBC_ABI_DT_RELR version dependency that
+ChromeOS links its libraries with RELR relocations (DT_RELR) but without the GLIBC_ABI_DT_RELR version dependency that
 upstream glibc requires for them ("DT_RELR without GLIBC_ABI_DT_RELR dependency"); ChromeOS's glibc doesn't check.
 This adds that version requirement under libc.so.6 with LIEF and writes a new file; the input is never modified.
 The vendor binary is not redistributed: run this on the copy taken from the machine's own ChromeOS partition.
 
-Usage: patch-libmali-relr.py <in libmali.so> <out libmali.so>   (needs: pip install lief)
+Usage: patch-cros-relr.py <in .so> <out .so>   (needs: pip install lief)
 """
 import sys
 import lief

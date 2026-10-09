@@ -1,13 +1,14 @@
 #!/bin/bash
 # Build ARM's Vulkan WSI layer (adds VK_KHR_wayland_surface to ChromeOS's headless-only libmali Vulkan driver) on the
-# device, with the quigon patch (explicit sync optional: Hyprland has no zwp_linux_explicit_synchronization_v1) and the
+# device, with the quigon patch (explicit sync optional: Hyprland has no zwp_linux_explicit_synchronization_v1; DRM
+# properties filled in so Mesa Zink can match the device) and the
 # "system" DMA-BUF heap (this kernel has no "linux,cma" heap). Installs the Mali ICD + layer system-wide. Run as root.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=/root/vulkan-wsi-layer
 [[ -d $src ]] || git clone https://gitlab.freedesktop.org/mesa/vulkan-wsi-layer.git $src
 cd $src && git checkout -q f5148d4f8c541f8aeddc88170b9e2dbbea2e8b43 && git checkout -q -- .
-git apply "$here/../port/quigon/patches/vulkan-wsi-layer-optional-explicit-sync.patch"
+git apply "$here/../port/quigon/patches/vulkan-wsi-layer-quigon.patch"
 sed -i 's/ -Werror//g' CMakeLists.txt   # GCC 16 maybe-uninitialized false positive in wsialloc_helpers.c
 pacman -S --noconfirm --needed cmake vulkan-headers vulkan-icd-loader wayland wayland-protocols libdrm >/dev/null
 cmake . -Bbuild -DCMAKE_BUILD_TYPE=Release -DBUILD_WSI_HEADLESS=1 -DBUILD_WSI_WAYLAND=1 \

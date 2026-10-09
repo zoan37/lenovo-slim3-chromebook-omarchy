@@ -1,25 +1,81 @@
-diff --git a/CMakeLists.txt b/CMakeLists.txt
-index b43b1ad..f332b98 100644
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -38,7 +38,7 @@ if (NOT CLANG_TIDY STREQUAL "CLANG_TIDY-NOTFOUND")
- endif()
+diff --git a/layer/layer.cpp b/layer/layer.cpp
+index d06bd7b..b30ad32 100644
+--- a/layer/layer.cpp
++++ b/layer/layer.cpp
+@@ -22,6 +22,8 @@
+  * SOFTWARE.
+  */
  
- string(APPEND CMAKE_CXX_FLAGS
--    " -Wall -Werror -Wextra"
-+    " -Wall -Wextra"
-     " -Wshadow -Wconversion"
-     " -Wdouble-promotion -Wnon-virtual-dtor -Wdelete-non-virtual-dtor"
-     " -Wcast-qual -Wmissing-format-attribute"
-@@ -46,7 +46,7 @@ string(APPEND CMAKE_CXX_FLAGS
- )
++#include <sys/stat.h>
++#include <sys/sysmacros.h>
+ #include <cassert>
+ #include <cstdio>
+ #include <cstring>
+@@ -1037,6 +1039,47 @@ wsi_layer_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice physical_device,
+    layer::populate_supported_layer_features(physical_device, *pFeatures);
+ }
  
- string(APPEND CMAKE_C_FLAGS
--    " -Wall -Werror -Wextra"
-+    " -Wall -Wextra"
-     " -Wshadow -Wconversion"
-     " -Wstrict-prototypes"
-     " -fPIC"
++/* quigon: ChromeOS's Mali ICD doesn't implement VK_EXT_physical_device_drm, so Mesa's Zink can't match it to the
++ * Wayland compositor's DRM device ("ZINK: failed to choose pdev") and falls back to llvmpipe. Fill the DRM properties
++ * from the real device nodes when the driver leaves them empty. */
++static void quigon_fill_drm_properties(VkPhysicalDeviceProperties2 *pProperties)
++{
++   auto *drm = util::find_extension<VkPhysicalDeviceDrmPropertiesEXT>(
++      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT, pProperties->pNext);
++   if (drm == nullptr || drm->hasRender || drm->hasPrimary)
++   {
++      return;
++   }
++   const char *render = getenv("QUIGON_VK_DRM_RENDER");
++   const char *primary = getenv("QUIGON_VK_DRM_PRIMARY");
++   struct stat st;
++   if (stat(render ? render : "/dev/dri/renderD128", &st) == 0 && S_ISCHR(st.st_mode))
++   {
++      drm->hasRender = VK_TRUE;
++      drm->renderMajor = major(st.st_rdev);
++      drm->renderMinor = minor(st.st_rdev);
++   }
++   if (stat(primary ? primary : "/dev/dri/card0", &st) == 0 && S_ISCHR(st.st_mode))
++   {
++      drm->hasPrimary = VK_TRUE;
++      drm->primaryMajor = major(st.st_rdev);
++      drm->primaryMinor = minor(st.st_rdev);
++   }
++}
++
++VWL_VKAPI_CALL(void)
++wsi_layer_vkGetPhysicalDeviceProperties2(VkPhysicalDevice physical_device,
++                                         VkPhysicalDeviceProperties2 *pProperties) VWL_API_POST
++{
++   auto &instance = layer::instance_private_data::get(physical_device);
++   auto fn = instance.disp.get_fn<PFN_vkGetPhysicalDeviceProperties2KHR>("vkGetPhysicalDeviceProperties2KHR");
++   if (fn.has_value())
++   {
++      (*fn)(physical_device, pProperties);
++   }
++   quigon_fill_drm_properties(pProperties);
++}
++
+ #define GET_PROC_ADDR(func)      \
+    if (!strcmp(funcName, #func)) \
+       return (PFN_vkVoidFunction)&wsi_layer_##func;
+@@ -1203,6 +1246,16 @@ wsi_layer_vkGetInstanceProcAddr(VkInstance instance, const char *funcName) VWL_A
+       GET_PROC_ADDR(vkGetPhysicalDeviceFeatures2);
+    }
+ 
++   if (instance_data.is_instance_extension_enabled(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) &&
++       !strcmp(funcName, "vkGetPhysicalDeviceProperties2KHR"))
++   {
++      return (PFN_vkVoidFunction)&wsi_layer_vkGetPhysicalDeviceProperties2;
++   }
++   if (core_1_1)
++   {
++      GET_PROC_ADDR(vkGetPhysicalDeviceProperties2);
++   }
++
+    if (instance_data.is_instance_extension_enabled(VK_KHR_SURFACE_EXTENSION_NAME))
+    {
+       PFN_vkVoidFunction wsi_func = wsi::get_proc_addr(funcName, instance_data);
 diff --git a/wsi/wayland/surface.cpp b/wsi/wayland/surface.cpp
 index e47d675..5cce63e 100644
 --- a/wsi/wayland/surface.cpp

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Google Chrome on the Mali-G57, the way ChromeOS runs it: ANGLE's OpenGL ES backend on ChromeOS's libmali
+# (through the egl-mali-shim built as libEGL.so.1, which maps ANGLE's platform display onto libmali's default
+# display) and ChromeOS's minigbm (mediatek backend) for buffers. /opt/quigon-gpu/chrome-lib holds those three.
+# Without /etc/quigon/gpu.env (GPU off) it runs Chrome unchanged.
+if [[ -f /etc/quigon/gpu.env && -e /opt/quigon-gpu/chrome-lib/libEGL.so.1 ]]; then
+  export LD_LIBRARY_PATH=/opt/quigon-gpu/chrome-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export QUIGON_EGL_SHIM_EXE=none
+  unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE
+  exec /usr/bin/google-chrome-stable --use-gl=angle --use-angle=gles "$@"
+fi
+exec /usr/bin/google-chrome-stable "$@"
