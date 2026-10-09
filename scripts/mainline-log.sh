@@ -7,7 +7,8 @@ b=/var/lib/quigon/mainline-blklog
 if [[ $(head -c 4 $b 2>/dev/null | tr -d "\0") == QBLK ]]; then
   echo "== disk log: $(head -1 $b)"
   tr -d '\0' < $b | grep -a -E "QM:|QBLK" | sed 's/^.*QM: /QM: /' | tail -n +2
-  echo "== disk log, last kernel messages:"; tr -d '\0' < $b | grep -a -v "QM:" | tail -${LINES_MAX:-40}
+  echo "== disk log, last kernel messages:"; tr -d '\0' < $b | sed '/^== wpa_supplicant:/,$d' | grep -a -v "QM:" | tail -${LINES_MAX:-40}
+  tr -d '\0' < $b | sed -n '/^== wpa_supplicant:/,$p'
   [[ ${1:-} == all ]] && { echo "== disk log, full:"; tr -d '\0' < $b; }
   dd if=/dev/zero of=$b bs=1M count=4 conv=notrunc,fsync status=none
 fi

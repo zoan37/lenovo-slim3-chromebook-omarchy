@@ -1,0 +1,113 @@
+diff --git a/drivers/pci/controller/pcie-mediatek-gen3.c b/drivers/pci/controller/pcie-mediatek-gen3.c
+index e2fb6e372..a9da5423b 100644
+--- a/drivers/pci/controller/pcie-mediatek-gen3.c
++++ b/drivers/pci/controller/pcie-mediatek-gen3.c
+@@ -60,6 +60,23 @@
+ #define PCIE_CFG_HEADER(bus, devfn) \
+ 	(PCIE_CFG_BUS(bus) | PCIE_CFG_DEVFN(devfn))
+ 
++
++/* quigon bring-up: numbered steps, each logged and followed by a pause long enough for the test init's
++ * once-a-second disk log to catch it; qstop=N returns -ENODEV just before step N. */
++static int qstop;
++module_param(qstop, int, 0644);
++static int qdelay = 1500;
++module_param(qdelay, int, 0644);
++#define QSTEP(n, what) do { \
++	pr_emerg("quigon-pcie: step %d: %s\n", (n), (what)); \
++	if (qdelay) \
++		msleep(qdelay); \
++	if (qstop == (n)) { \
++		pr_emerg("quigon-pcie: qstop=%d, bailing out\n", (n)); \
++		return -ENODEV; \
++	} \
++} while (0)
++
+ #define PCIE_RST_CTRL_REG		0x148
+ #define PCIE_MAC_RSTB			BIT(0)
+ #define PCIE_PHY_RSTB			BIT(1)
+@@ -496,6 +513,7 @@ static int mtk_pcie_startup_port(struct mtk_gen3_pcie *pcie)
+ 	int err;
+ 	u32 val;
+ 
++	QSTEP(8, "first controller register read (PCIE_SETTING_REG)");
+ 	/* Set as RC mode and set controller PCIe Gen speed restriction, if any */
+ 	val = readl_relaxed(pcie->base + PCIE_SETTING_REG);
+ 	val |= PCIE_RC_MODE;
+@@ -548,6 +566,7 @@ static int mtk_pcie_startup_port(struct mtk_gen3_pcie *pcie)
+ 	val |= PCIE_DISABLE_DVFSRC_VLT_REQ;
+ 	writel_relaxed(val, pcie->base + PCIE_MISC_CTRL_REG);
+ 
++	QSTEP(9, "enable_msi");
+ 	mtk_pcie_enable_msi(pcie);
+ 
+ 	/* Set PCIe translation windows */
+@@ -573,11 +592,13 @@ static int mtk_pcie_startup_port(struct mtk_gen3_pcie *pcie)
+ 			return err;
+ 	}
+ 
++	QSTEP(11, "devices_power_up (resets, PERST#)");
+ 	err = mtk_pcie_devices_power_up(pcie);
+ 	if (err)
+ 		return err;
+ 
+ 	/* Check if the link is up or not */
++	QSTEP(12, "link-up poll");
+ 	err = readl_poll_timeout(pcie->base + PCIE_LINK_STATUS_REG, val,
+ 				 !!(val & PCIE_PORT_LINKUP), 20,
+ 				 PCI_PM_D3COLD_WAIT * USEC_PER_MSEC);
+@@ -1113,12 +1134,14 @@ static int mtk_pcie_power_up(struct mtk_gen3_pcie *pcie)
+ 		return err;
+ 	}
+ 
++	QSTEP(4, "phy_init");
+ 	err = phy_init(pcie->phy);
+ 	if (err) {
+ 		dev_err(dev, "failed to initialize PHY\n");
+ 		goto err_phy_init;
+ 	}
+ 
++	QSTEP(5, "phy_power_on");
+ 	err = phy_power_on(pcie->phy);
+ 	if (err) {
+ 		dev_err(dev, "failed to power on PHY\n");
+@@ -1128,9 +1151,11 @@ static int mtk_pcie_power_up(struct mtk_gen3_pcie *pcie)
+ 	/* MAC power on and enable transaction layer clocks */
+ 	reset_control_deassert(pcie->mac_reset);
+ 
++	QSTEP(6, "pm_runtime_get_sync (power domain on)");
+ 	pm_runtime_enable(dev);
+ 	pm_runtime_get_sync(dev);
+ 
++	QSTEP(7, "clk_bulk_prepare_enable");
+ 	err = clk_bulk_prepare_enable(pcie->num_clks, pcie->clks);
+ 	if (err) {
+ 		dev_err(dev, "failed to enable clocks\n");
+@@ -1243,16 +1268,19 @@ static int mtk_pcie_probe(struct platform_device *pdev)
+ 	pcie->soc = device_get_match_data(dev);
+ 	platform_set_drvdata(pdev, pcie);
+ 
++	QSTEP(1, "setup_irq (chained handler on SPI 467)");
+ 	err = mtk_pcie_setup_irq(pcie);
+ 	if (err)
+ 		return dev_err_probe(dev, err, "Failed to setup IRQ domains\n");
+ 
++	QSTEP(2, "pwrctrl create");
+ 	err = pci_pwrctrl_create_devices(pcie->dev);
+ 	if (err) {
+ 		dev_err_probe(dev, err, "failed to create pwrctrl devices\n");
+ 		goto err_tear_down_irq;
+ 	}
+ 
++	QSTEP(3, "mtk_pcie_setup");
+ 	err = mtk_pcie_setup(pcie);
+ 	if (err)
+ 		goto err_destroy_pwrctrl;
+@@ -1260,6 +1288,7 @@ static int mtk_pcie_probe(struct platform_device *pdev)
+ 	host->ops = &mtk_pcie_ops;
+ 	host->sysdata = pcie;
+ 
++	QSTEP(13, "pci_host_probe");
+ 	err = pci_host_probe(host);
+ 	if (err)
+ 		goto err_power_down_pcie;

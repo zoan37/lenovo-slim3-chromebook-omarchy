@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * quigon USB, from ChromeOS's mt8189.dtsi / mt8189-skywalker.dtsi: XHCI3 (T-PHY port 3, USB2 + USB3) carries the
+ * Realtek RTS5411 hub behind the external ports; XHCI4 (XS-PHY port 4) carries the MT7922's Bluetooth. Mainline
+ * mtk-xhci binds on the generic "mediatek,mtk-xhci". The hub needs no DT node (its supply, pp3300_s3, is always on).
+ * USB-A VBUS (pp5000_usb) is switched by GPIO 131 ("USB_INIT_DONE"); without it nothing on the A ports enumerates.
+ */
+#include <dt-bindings/phy/phy.h>
+
+/ {
+	pp5000_usb: regulator-pp5000-usb {
+		compatible = "regulator-fixed";
+		regulator-name = "pp5000_usb";
+		regulator-always-on;
+		regulator-boot-on;
+		off-on-delay-us = <400000>;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&pio 131 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb_init_done_pins>;
+	};
+
+	soc {
+		u3phy3: t-phy@11b00000 {
+			compatible = "mediatek,mt8189-tphy", "mediatek,generic-tphy-v2";
+			reg = <0 0x11b00000 0 0x700>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			u2port3: usb-phy@11b00000 {
+				reg = <0 0x11b00000 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P3_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+
+			u3port3: usb-phy@11b00700 {
+				reg = <0 0x11b00700 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P3_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+		};
+
+		u2phy4: xs-phy@11b10000 {
+			compatible = "mediatek,mt8189-xsphy", "mediatek,xsphy";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			u2port4: usb-phy@11b10000 {
+				reg = <0 0x11b10000 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P4_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+		};
+
+		xhci3: usb@11260000 {
+			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
+			reg = <0 0x11260000 0 0x2e00>,
+			      <0 0x11263e00 0 0x0100>;
+			reg-names = "mac", "ippc";
+			interrupts = <GIC_SPI 473 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "host";
+			phys = <&u2port3 PHY_TYPE_USB2>,
+			       <&u3port3 PHY_TYPE_USB3>;
+			clocks = <&peri_ao CLK_PERAO_SSUSB3_SYS>,
+				 <&peri_ao CLK_PERAO_SSUSB3_REF>,
+				 <&peri_ao CLK_PERAO_SSUSB3_H>,
+				 <&peri_ao CLK_PERAO_SSUSB3_F>,
+				 <&peri_ao CLK_PERAO_SSUSB3_XHCI>,
+				 <&peri_ao CLK_PERAO_SSUSB3_FRMCNT>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		xhci4: usb@11270000 {
+			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
+			reg = <0 0x11270000 0 0x1000>,
+			      <0 0x11273e00 0 0x0100>;
+			reg-names = "mac", "ippc";
+			interrupts = <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "host";
+			phys = <&u2port4 PHY_TYPE_USB2>;
+			clocks = <&peri_ao CLK_PERAO_SSUSB4_SYS>,
+				 <&peri_ao CLK_PERAO_SSUSB4_REF>,
+				 <&peri_ao CLK_PERAO_SSUSB4_H>,
+				 <&peri_ao CLK_PERAO_SSUSB4_F>,
+				 <&peri_ao CLK_PERAO_SSUSB4_XHCI>,
+				 <&peri_ao CLK_PERAO_SSUSB4_FRMCNT>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+	};
+};
+
+&pio {
+	usb_init_done_pins: usb-init-done-pins {
+		pins-enable {
+			pinmux = <PINMUX_GPIO131__FUNC_GPIO131>;
+			output-high;
+		};
+	};
+};

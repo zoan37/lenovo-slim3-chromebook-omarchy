@@ -6,7 +6,7 @@
 # without Wi-Fi it reboots after 20 s. The hardware watchdog (30 s) covers a hang either way.
 # Build-host-only files, never in the repo: /etc/wpa_supplicant/wpa_supplicant.conf (Wi-Fi credentials) and
 # /root/.ssh/authorized_keys.
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 mount -t proc proc /proc; mount -t sysfs sys /sys; mount -t devtmpfs dev /dev 2>/dev/null
 mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
 mkdir -p /dev/pts /run /tmp; mount -t devpts devpts /dev/pts; mount -t tmpfs tmpfs /run; mount -t tmpfs tmpfs /tmp
@@ -47,22 +47,49 @@ k "clk summary lines: $(wc -l < /sys/kernel/debug/clk/clk_summary 2>/dev/null), 
 # (noload), so the test kernel never writes to the real install.
 i=0; while [ ! -b /dev/sda7 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
 
-# Hang-proof log: quigon.blklog=<4 KiB block in sda7> names a preallocated 4 MiB file on Omarchy's root
-# (/var/lib/quigon/mainline-blklog, one extent; mainline-log prints it). blk <step> writes the step name and the
-# current kernel log there and flushes it, so a hard freeze that wipes pstore still leaves the last step on disk.
-# Written only if the region holds zeros or an earlier QBLK header, so a stale offset can't hit filesystem data.
-blkoff=$(sed -n 's/.*quigon\.blklog=\([0-9]*\).*/\1/p' /proc/cmdline); blkseq=0
-blk() {
-  [ -n "$blkoff" ] && [ -b /dev/sda7 ] || return 0
-  head=$(dd if=/dev/sda7 bs=4096 skip=$blkoff count=1 2>/dev/null | head -c 4 | tr -d '\0')
-  [ -z "$head" ] || [ "$head" = QBLK ] || { k "blklog: region not empty/QBLK ('$head'), not writing"; blkoff=; return 0; }
-  blkseq=$((blkseq+1))
-  { echo "QBLK seq=$blkseq step=$* uptime=$(cut -d' ' -f1 /proc/uptime)"; dmesg; } > /tmp/blk
-  truncate -s 4194304 /tmp/blk
-  dd if=/tmp/blk of=/dev/sda7 bs=4096 seek=$blkoff count=1024 conv=notrunc,fsync 2>/dev/null
-}
+# Hang-proof disk log (see /usr/local/bin/qblk): blk <step> snapshots, blkbg <label> every second.
+blk() { qblk "$@"; }
+blkbgpid=
+blkbg() { blkbgpid=$(qblk -bg "$@"); }
+blkbg_stop() { [ -n "$blkbgpid" ] && kill $blkbgpid 2>/dev/null; blkbgpid=; }
 blk "start"
 
+# Wi-Fi early, before the risky steps, so the test kernel is reachable over SSH while they run. USB dongle
+# (RTL8821AU, rtw88 modules) while PCIe (the internal MT7922) is parked.
+netup=
+blkbg wifi
+for m in rfkill libarc4 cfg80211 mac80211 rtw88_core rtw88_usb rtw88_88xxa rtw88_8821a rtw88_8821au; do
+  [ -f /lib/modules/$m.ko ] || continue
+  blk "before insmod $m"; insmod /lib/modules/$m.ko; k "wifi: insmod $m -> $?"
+done
+blk "wifi modules loaded"
+
+i=0; while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
+if [ -d /sys/class/net/wlan0 ] && [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+  ip link set lo up
+  ip link set wlan0 up; k "wifi: wlan0 up -> $?"; sleep 2
+  timeout 20 iw dev wlan0 scan > /tmp/scan.txt 2>&1
+  ssid=$(sed -n 's/^[[:space:]]*ssid="\(.*\)"/\1/p' /etc/wpa_supplicant/wpa_supplicant.conf | head -1)
+  # (the network name stays out of the log: only whether it was seen, and on which frequencies)
+  k "wifi: scan: $(grep -c '^BSS' /tmp/scan.txt) networks; configured network seen: $(awk -v s="$ssid" '/^BSS/{f=""} /freq:/{f=$2} $1=="SSID:"{sub(/^[ \t]*SSID: /,""); if ($0==s) printf "%s MHz ", f}' /tmp/scan.txt)"
+  blk "wlan0 present, starting wpa_supplicant"
+  # (Alpine's wpa_supplicant has no -f: run it in the background with its output in /tmp/wpa.log)
+  wpa_supplicant -d -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf > /tmp/wpa.log 2>&1 &
+  sleep 1; k "wifi: wpa_supplicant $(kill -0 $! 2>/dev/null && echo running || echo exited: $(grep -v -i -E 'psk|ssid' /tmp/wpa.log | tail -3 | tr '\n' ';'))"
+  sleep 5; k "wifi: $(grep -E 'CTRL-EVENT-(CONNECTED|DISCONNECTED|SSID-TEMP-DISABLED|ASSOC-REJECT|AUTH-REJECT)|WPA: Key negotiation completed' /tmp/wpa.log | sed -E 's/([0-9a-f]{2}:){5}[0-9a-f]{2}/<mac>/g; s/ssid=\"[^\"]*\"/ssid=<..>/g' | tail -3 | tr '\n' ';')"; blk "wpa_supplicant started"
+  if udhcpc -i wlan0 -r 192.168.0.22 -t 15 -T 2 -n -q -s /usr/share/udhcpc/default.script > /tmp/dhcp.log 2>&1; then
+    k "network up: $(ip -4 -o addr show wlan0 | awk '{print $4}') via $(ip route | awk '/default/{print $3}')"
+    mkdir -p /etc/dropbear && dropbear -R -E -s -p 22 2>/tmp/dropbear.log && k "ssh (dropbear) listening"
+    netup=1; blk "network up"
+  else
+    k "no DHCP lease: $(tail -3 /tmp/wpa.log | tr '\n' ';') $(tail -2 /tmp/dhcp.log | tr '\n' ';')"
+  fi
+else
+  k "no wlan0 after 15 s: $(dmesg | grep -i -E 'rtw|usb|mt79|pcie|pci ' | tail -6 | tr '\n' ';' | cut -c1-900)"
+fi
+
+
+blkbg_stop
 # Display drivers as modules, one at a time, each step logged to disk first (the built-in display froze the SoC).
 for m in mtk-mmsys mtk-mutex drm_dma_helper phy-mtk-edp mtk_dp mediatek-drm; do
   [ -f /lib/modules/$m.ko ] || continue
@@ -95,7 +122,7 @@ fi
 
 # PCIe controller: loaded here under a timeout, with the driver's debug messages on. If the probe doesn't return,
 # record where every CPU is and stop feeding the watchdog: the reset keeps pstore (a power-off wouldn't).
-if [ -f /lib/modules/pcie-mediatek-gen3.ko ]; then
+if [ -f /lib/modules/pcie-mediatek-gen3.ko ] && ! grep -q quigon.pcie=manual /proc/cmdline; then
   echo 9 > /proc/sys/kernel/printk
   k "pcie: insmod start"
   insmod /lib/modules/pcie-mediatek-gen3.ko dyndbg=+p &
@@ -110,25 +137,11 @@ if [ -f /lib/modules/pcie-mediatek-gen3.ko ]; then
   k "pcie: insmod returned after $i s: $(dmesg | grep -i -E 'mtk-pcie|pcie|tphy' | tail -8 | tr '\n' ';' | cut -c1-900)"
 fi
 
-stay=20
+stay=20; [ -n "$netup" ] && stay=1200
 # With a working display, say hello on it and stay up a minute so it can be seen.
 if [ -e /dev/fb0 ]; then
   printf '\n\n  quigon: mainline %s on the internal display (Panfrost GPU, fbcon)\n\n' "$(uname -r)" > /dev/tty1 2>/dev/null
-  k "display: fb0 present, wrote a banner to tty1"; stay=60
-fi
-i=0; while [ ! -d /sys/class/net/wlan0 ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); done
-if [ -d /sys/class/net/wlan0 ] && [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-  ip link set lo up
-  wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf -f /tmp/wpa.log
-  if udhcpc -i wlan0 -r 192.168.0.22 -t 15 -T 2 -n -q -s /usr/share/udhcpc/default.script > /tmp/dhcp.log 2>&1; then
-    k "network up: $(ip -4 -o addr show wlan0 | awk '{print $4}') via $(ip route | awk '/default/{print $3}')"
-    mkdir -p /etc/dropbear && dropbear -R -E -s -p 22 2>/tmp/dropbear.log && k "ssh (dropbear) listening"
-    stay=1200
-  else
-    k "no DHCP lease: $(tail -3 /tmp/wpa.log | tr '\n' ';') $(tail -2 /tmp/dhcp.log | tr '\n' ';')"
-  fi
-else
-  k "no wlan0 after 15 s: $(dmesg | grep -i -E 'mt79|pcie|pci ' | tail -6 | tr '\n' ';' | cut -c1-900)"
+  k "display: fb0 present, wrote a banner to tty1"; [ -n "$netup" ] || stay=60
 fi
 k "staying up ${stay} s (touch /tmp/stay-more to extend, /tmp/reboot-now to leave), then reboot"
 while [ $stay -gt 0 ] && [ ! -e /tmp/reboot-now ]; do
