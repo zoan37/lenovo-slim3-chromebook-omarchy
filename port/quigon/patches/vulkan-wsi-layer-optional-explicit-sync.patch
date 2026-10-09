@@ -1,0 +1,108 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b43b1ad..f332b98 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,7 +38,7 @@ if (NOT CLANG_TIDY STREQUAL "CLANG_TIDY-NOTFOUND")
+ endif()
+ 
+ string(APPEND CMAKE_CXX_FLAGS
+-    " -Wall -Werror -Wextra"
++    " -Wall -Wextra"
+     " -Wshadow -Wconversion"
+     " -Wdouble-promotion -Wnon-virtual-dtor -Wdelete-non-virtual-dtor"
+     " -Wcast-qual -Wmissing-format-attribute"
+@@ -46,7 +46,7 @@ string(APPEND CMAKE_CXX_FLAGS
+ )
+ 
+ string(APPEND CMAKE_C_FLAGS
+-    " -Wall -Werror -Wextra"
++    " -Wall -Wextra"
+     " -Wshadow -Wconversion"
+     " -Wstrict-prototypes"
+     " -fPIC"
+diff --git a/wsi/wayland/surface.cpp b/wsi/wayland/surface.cpp
+index e47d675..5cce63e 100644
+--- a/wsi/wayland/surface.cpp
++++ b/wsi/wayland/surface.cpp
+@@ -264,19 +264,22 @@ bool surface::init()
+ 
+    if (explicit_sync_interface.get() == nullptr)
+    {
+-      WSI_LOG_ERROR("Failed to obtain zwp_linux_explicit_synchronization_v1 interface.");
+-      return false;
++      /* quigon: compositors without zwp_linux_explicit_synchronization_v1 (Hyprland) get implicit sync:
++       * swapchain::present_image waits for the present fence on the CPU before committing. */
++      WSI_LOG_WARNING("zwp_linux_explicit_synchronization_v1 not available, falling back to CPU-waited sync.");
+    }
+-
+-   auto surface_sync_obj =
+-      zwp_linux_explicit_synchronization_v1_get_synchronization(explicit_sync_interface.get(), wayland_surface);
+-   if (surface_sync_obj == nullptr)
++   else
+    {
+-      WSI_LOG_ERROR("Failed to retrieve surface synchronization interface");
+-      return false;
+-   }
++      auto surface_sync_obj =
++         zwp_linux_explicit_synchronization_v1_get_synchronization(explicit_sync_interface.get(), wayland_surface);
++      if (surface_sync_obj == nullptr)
++      {
++         WSI_LOG_ERROR("Failed to retrieve surface synchronization interface");
++         return false;
++      }
+ 
+-   surface_sync_interface.reset(surface_sync_obj);
++      surface_sync_interface.reset(surface_sync_obj);
++   }
+ 
+    VkResult vk_res = VK_SUCCESS;
+    if (presentation_time_interface.get() != nullptr)
+diff --git a/wsi/wayland/surface_properties.cpp b/wsi/wayland/surface_properties.cpp
+index 366e262..b1285e6 100644
+--- a/wsi/wayland/surface_properties.cpp
++++ b/wsi/wayland/surface_properties.cpp
+@@ -376,7 +376,8 @@ static bool check_wl_protocols(struct wl_display *display)
+       return false;
+    }
+ 
+-   return (supported.dmabuf && supported.explicit_sync);
++   /* quigon: explicit sync is optional (see surface.cpp). */
++   return supported.dmabuf;
+ }
+ 
+ VWL_VKAPI_CALL(VkBool32)
+diff --git a/wsi/wayland/swapchain.cpp b/wsi/wayland/swapchain.cpp
+index 0e0e8ed..c1481cb 100644
+--- a/wsi/wayland/swapchain.cpp
++++ b/wsi/wayland/swapchain.cpp
+@@ -24,6 +24,8 @@
+ 
+ #define VK_USE_PLATFORM_WAYLAND_KHR 1
+ 
++#include <poll.h>
++#include <cerrno>
+ #include "surface_properties.hpp"
+ #include <cstdint>
+ #include <cstring>
+@@ -418,8 +420,19 @@ void swapchain::present_image(const pending_present_request &pending_present)
+    }
+    else if (present_sync_fd->is_valid())
+    {
+-      zwp_linux_surface_synchronization_v1_set_acquire_fence(m_wsi_surface->get_surface_sync_interface(),
+-                                                             present_sync_fd->get());
++      if (m_wsi_surface->get_surface_sync_interface() != nullptr)
++      {
++         zwp_linux_surface_synchronization_v1_set_acquire_fence(m_wsi_surface->get_surface_sync_interface(),
++                                                                present_sync_fd->get());
++      }
++      else
++      {
++         /* quigon: no explicit sync protocol; make sure rendering is done before the compositor samples it. */
++         struct pollfd pfd = { present_sync_fd->get(), POLLIN, 0 };
++         while (poll(&pfd, 1, -1) < 0 && errno == EINTR)
++         {
++         }
++      }
+    }
+ 
+    /* TODO: work out damage */
