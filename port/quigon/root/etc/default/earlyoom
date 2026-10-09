@@ -1,4 +1,5 @@
 # quigon: kill early instead of freezing. Acts when available RAM < 5% AND free swap (zram) < 10%.
-# Prefer Chrome/Electron processes (Chrome gives its tab renderers the highest oom_score, so a tab goes first, like
-# ChromeOS's tab discarding); never pick the compositor, bar, audio, network, session or SSH. -N: tell the user.
-EARLYOOM_ARGS="-m 5 -s 10 -r 3600 --prefer ^(chrome|grok-bot|electron)$ --avoid ^(Hyprland|start-hyprland|quickshell|Xwayland|pipewire|pipewire-pulse|wireplumber|systemd|systemd-.*|sshd|sshd-session|dbus-.*|seatd|uwsm.*|NetworkManager|wpa_supplicant|gnome-keyring-d|xdg-desktop-por|cbridge-agent|foot|ghostty|bash)$ -N /usr/local/libexec/quigon/earlyoom-notify"
+# Last resort only (Chrome Memory Saver + 15G zram come first). Prefer Chrome: its tab renderers rank highest (all 300 on
+# Linux, so the largest tab goes, not necessarily a background one); never pick the compositor, bar, audio, network,
+# session, SSH, terminals, Grok Bot, Claude Code or nvim (typed work). -N: tell the user.
+EARLYOOM_ARGS="-m 5 -s 10 -r 3600 --prefer ^(chrome)$ --avoid ^(Hyprland|start-hyprland|quickshell|Xwayland|pipewire|pipewire-pulse|wireplumber|systemd|systemd-.*|sshd|sshd-session|dbus-.*|seatd|uwsm.*|NetworkManager|wpa_supplicant|gnome-keyring-d|xdg-desktop-por|cbridge-agent|foot|ghostty|bash|grok-bot|claude|nvim)$ -N /usr/local/libexec/quigon/earlyoom-notify"

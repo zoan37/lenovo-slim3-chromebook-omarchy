@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/omarchy-battery-status
+
+[Action]
+Description = Patching omarchy-battery-status for this Chromebook's battery...
+When = PostTransaction
+Exec = /usr/local/bin/fix-omarchy-battery-status
