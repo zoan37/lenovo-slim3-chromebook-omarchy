@@ -6,7 +6,7 @@
 set -euo pipefail
 tag=${1:?tag}; extra=${2:-}
 here=$(cd "$(dirname "$0")" && pwd); M=$here/../port/quigon/mainline
-BH=${QUIGON_BUILD_HOST:-user@build-host}; CB=${QUIGON_HOST:-root@192.168.0.22}
+BH=${QUIGON_BUILD_HOST:?set QUIGON_BUILD_HOST=user@build-host}; CB=${QUIGON_HOST:-root@192.168.0.22}
 scp -q "$M/mt8189-quigon.dts" "$M/mt8189-pinfunc.h" "$BH:quigon-kernel/linux-next/arch/arm64/boot/dts/mediatek/"
 [[ -n ${RECONFIG:-} ]] && { scp -q "$here/mainline-config.sh" "$BH:quigon-kernel/"; ssh "$BH" 'cd ~/quigon-kernel && ./mainline-config.sh linux-next build-s1 initramfs'; }
 scp -q "$M/init-stage1.sh" "$BH:quigon-kernel/initramfs/init"
