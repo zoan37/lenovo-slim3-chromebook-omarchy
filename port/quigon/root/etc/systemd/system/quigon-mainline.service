@@ -14,14 +14,9 @@ RemainAfterExit=yes
 # Masking it makes them all run stock Mesa, which on mainline is Panfrost on the Mali: no shims needed.
 ExecStart=/bin/sh -c '[ -f /etc/quigon/gpu.env ] && mount --bind /dev/null /etc/quigon/gpu.env || true'
 # The EC expects the SoC's sleep signal within its default timeout after a suspend notice and resets the machine when
-# it doesn't come (s2idle on mainline never produces it: "EC detected sleep transition timeout"). 65535 = no timeout.
-# Lid and keyboard still wake it.
+# it doesn't come; a shallow s2idle never produced it ("EC detected sleep transition timeout"). Since the SPM s2idle
+# state (mt8189-quigon-suspend.dtsi) the SoC really sleeps; the timeout stays off as a safety net. 65535 = no timeout.
 ExecStart=-/bin/sh -c 'echo 65535 > /sys/kernel/debug/cros_ec/suspend_timeout_ms'
-# Suspend isn't usable on mainline yet (resume works, but the eDP link to the panel doesn't come back and switching the
-# display on again faults; notes/mainline-20261009.md). Until it is, refuse to sleep for this boot only: a lid close
-# or idle timeout then locks and blanks instead of crashing. Delete /run/systemd/sleep.conf.d/quigon-mainline.conf
-# to experiment.
-ExecStart=/bin/sh -c 'mkdir -p /run/systemd/sleep.conf.d && printf "[Sleep]\\nAllowSuspend=no\\nAllowHibernation=no\\nAllowHybridSleep=no\\nAllowSuspendThenHibernate=no\\n" > /run/systemd/sleep.conf.d/quigon-mainline.conf'
 
 [Install]
 WantedBy=sysinit.target

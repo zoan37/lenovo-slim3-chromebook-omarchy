@@ -1,7 +1,6 @@
 #!/bin/bash
 # quigon: Omarchy's lid-close (lock + clamshell), then switch the laptop panel off when nothing else is showing the
-# desktop. Under the mainline kernel the lid can't suspend yet, so this is what keeps a closed laptop dark; under the
-# ChromeOS kernel it covers a lid close on the charger (logind ignores it there, 40-quigon-lid-ac.conf).
+# desktop: covers a lid close on the charger, where logind doesn't suspend (40-quigon-lid-ac.conf), under both kernels.
 # Run by quigon-lid-watch (Hyprland's lid bindings don't fire here); omarchy-hyprland-monitor-clamshell, run on lid
 # open, switches the panel back on.
 logger -t quigon-lid "lid-close ($*)"

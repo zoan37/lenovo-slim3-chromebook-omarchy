@@ -254,6 +254,22 @@
 	status = "okay";
 };
 
+/*
+ * MFG1's bus protection has a step in the EMI config (GALS sleep protect, set/clear at 0x84/0x88), which the
+ * power-controller driver finds through a "mediatek,smi" phandle (its legacy regmap lookup; the access-controllers
+ * property would make fw_devlink wait for a driver this syscon never gets). Without it the lookup fell back to index
+ * 0 and the step wrote into INFRACFG_AO instead; MFG1 only cycles in system suspend, after which the display faulted
+ * (SError) as soon as it fetched pixels again. The EMI config block is ChromeOS's scpsys "emicfg-ao-mem".
+ */
+/ {
+	soc {
+		emicfg_ao_mem: syscon@10270000 {
+			compatible = "mediatek,mt8189-emicfg-ao-mem", "syscon";
+			reg = <0 0x10270000 0 0x1000>;
+		};
+	};
+};
+
 /* GPU power domains (not in the Genio series' mt8189.dtsi): MFG0 > MFG1 > MFG2, MFG3, like MT8188, with ChromeOS's
  * supplies (mfg0: vproc1 = GPU core rail, mfg1: vsram_proc1 = GPU SRAM rail) and MFG clocks. */
 &spm {
@@ -271,6 +287,7 @@
 			clock-names = "mfg", "alt";
 			domain-supply = <&mt6359_vsram_proc1_ldo_reg>;
 			mediatek,infracfg = <&infra_ao>;
+			mediatek,smi = <&emicfg_ao_mem>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 			#power-domain-cells = <1>;

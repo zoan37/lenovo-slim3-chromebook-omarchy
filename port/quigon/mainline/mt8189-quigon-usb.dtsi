@@ -120,6 +120,9 @@
 				 <&peri_ao CLK_PERAO_SSUSB0_FRMCNT>;
 			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
 			mediatek,u3p-dis-msk = <0x1>;
+			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
+			wakeup-source;
+			mediatek,syscon-wakeup = <&peri_ao 0x214 110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 		};
@@ -141,6 +144,9 @@
 			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
 			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
 			vbus-supply = <&pp3300_s3>;
+			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
+			wakeup-source;
+			mediatek,syscon-wakeup = <&peri_ao 0x21c 110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 		};
@@ -163,6 +169,9 @@
 			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
 			/* the USB camera's 3.3 V (ChromeOS: pp3300_ucam_x) */
 			vbus-supply = <&mt6359_vcn33_2_ldo_reg>;
+			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
+			wakeup-source;
+			mediatek,syscon-wakeup = <&peri_ao 0x27c 110>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 		};

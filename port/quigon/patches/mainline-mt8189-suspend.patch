@@ -1,0 +1,420 @@
+From 30c185c8893b6951068464037b51976e4984dd33 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 12:21:18 -0400
+Subject: [PATCH 2/2] quigon: MT8189 system suspend (s2idle through the SPM)
+
+- DT: ChromeOS cpu-s2idle idle state (PSCI CPU_SUSPEND 0x20180ff), the SoC sleeps when the last CPU enters it
+- power domains: DISP always on (its power-off fails part way in suspend and blocks the display memory path);
+  PCIe kept up in s2idle (as ChromeOS); MFG1 EMI bus protection gets its EMICFG regmap (mediatek,smi), it wrote
+  into INFRACFG_AO before
+- xhci-mtk: MT8189 masked USB3 port powered down so the IP can sleep, ChromeOS retries, wakeup V1_10, no
+  clock gating of an IP that did not sleep; USB wakeup properties
+- mtk_dp (eDP TX v2): suspend leaves the port as a runtime display-off does; resume sets the port up the
+  boot-time way only when the sleep reset it
+---
+ .../boot/dts/mediatek/mt8189-quigon-all.dts   |  1 +
+ .../dts/mediatek/mt8189-quigon-suspend.dtsi   | 28 +++++++++
+ .../boot/dts/mediatek/mt8189-quigon-usb.dtsi  |  9 +++
+ .../arm64/boot/dts/mediatek/mt8189-quigon.dts | 17 ++++++
+ drivers/gpu/drm/mediatek/mtk_dp.c             | 42 +++++++++++--
+ drivers/pci/controller/pcie-mediatek-gen3.c   | 15 +++++
+ drivers/pmdomain/mediatek/mt8189-pm-domains.h | 11 +++-
+ drivers/usb/host/xhci-mtk.c                   | 59 +++++++++++++++----
+ drivers/usb/host/xhci-mtk.h                   |  1 +
+ 9 files changed, 164 insertions(+), 19 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/mediatek/mt8189-quigon-suspend.dtsi
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt8189-quigon-all.dts b/arch/arm64/boot/dts/mediatek/mt8189-quigon-all.dts
+index e5b6c1861..ffc619090 100644
+--- a/arch/arm64/boot/dts/mediatek/mt8189-quigon-all.dts
++++ b/arch/arm64/boot/dts/mediatek/mt8189-quigon-all.dts
+@@ -10,3 +10,4 @@
+ #include "mt8189-quigon-vcodec.dtsi"
+ #include "mt8189-quigon-hdmi.dtsi"
+ #include "mt8189-quigon-dp.dtsi"
++#include "mt8189-quigon-suspend.dtsi"
+diff --git a/arch/arm64/boot/dts/mediatek/mt8189-quigon-suspend.dtsi b/arch/arm64/boot/dts/mediatek/mt8189-quigon-suspend.dtsi
+new file mode 100644
+index 000000000..f8bcf66ad
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt8189-quigon-suspend.dtsi
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * System sleep for quigon, as ChromeOS does it: the firmware has no PSCI SYSTEM_SUSPEND; suspend is s2idle, and the
++ * deepest idle state is a PSCI CPU_SUSPEND at system power level (0x20180ff). When the last CPU enters it, TF-A and the
++ * SPM put the SoC into its sleep state (DRAM self-refresh, wake sources armed, the EC sees the sleep signal). Its
++ * infinite min-residency keeps the runtime idle governor away from it; s2idle always picks the deepest state.
++ * From ChromeOS's mt8189.dtsi.
++ */
++
++&{/cpus/idle-states} {
++	cpu_s2idle: cpu-s2idle {
++		compatible = "arm,idle-state";
++		arm,psci-suspend-param = <0x020180ff>;
++		local-timer-stop;
++		entry-latency-us = <10000>;
++		exit-latency-us = <10000>;
++		min-residency-us = <0xffffffff>;
++	};
++};
++
++&cpu0 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu1 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu2 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu3 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu4 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu5 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
++&cpu6 { cpu-idle-states = <&cpu_off_b &cpu_s2idle>; };
++&cpu7 { cpu-idle-states = <&cpu_off_b &cpu_s2idle>; };
+diff --git a/arch/arm64/boot/dts/mediatek/mt8189-quigon-usb.dtsi b/arch/arm64/boot/dts/mediatek/mt8189-quigon-usb.dtsi
+index 4297fbdb4..fabe2d4a0 100644
+--- a/arch/arm64/boot/dts/mediatek/mt8189-quigon-usb.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt8189-quigon-usb.dtsi
+@@ -120,6 +120,9 @@ xhci0: usb@11200000 {
+ 				 <&peri_ao CLK_PERAO_SSUSB0_FRMCNT>;
+ 			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+ 			mediatek,u3p-dis-msk = <0x1>;
++			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
++			wakeup-source;
++			mediatek,syscon-wakeup = <&peri_ao 0x214 110>;
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+ 		};
+@@ -141,6 +144,9 @@ xhci1: usb@11210000 {
+ 			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+ 			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
+ 			vbus-supply = <&pp3300_s3>;
++			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
++			wakeup-source;
++			mediatek,syscon-wakeup = <&peri_ao 0x21c 110>;
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+ 		};
+@@ -163,6 +169,9 @@ xhci2: usb@11220000 {
+ 			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
+ 			/* the USB camera's 3.3 V (ChromeOS: pp3300_ucam_x) */
+ 			vbus-supply = <&mt6359_vcn33_2_ldo_reg>;
++			/* USB wake through the SPM (ChromeOS: SSUSB_UWK_V1_10 = 110) */
++			wakeup-source;
++			mediatek,syscon-wakeup = <&peri_ao 0x27c 110>;
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+ 		};
+diff --git a/arch/arm64/boot/dts/mediatek/mt8189-quigon.dts b/arch/arm64/boot/dts/mediatek/mt8189-quigon.dts
+index 15e7002fe..7e50cdf81 100644
+--- a/arch/arm64/boot/dts/mediatek/mt8189-quigon.dts
++++ b/arch/arm64/boot/dts/mediatek/mt8189-quigon.dts
+@@ -254,6 +254,22 @@ &pciephy {
+ 	status = "okay";
+ };
+ 
++/*
++ * MFG1's bus protection has a step in the EMI config (GALS sleep protect, set/clear at 0x84/0x88), which the
++ * power-controller driver finds through a "mediatek,smi" phandle (its legacy regmap lookup; the access-controllers
++ * property would make fw_devlink wait for a driver this syscon never gets). Without it the lookup fell back to index
++ * 0 and the step wrote into INFRACFG_AO instead; MFG1 only cycles in system suspend, after which the display faulted
++ * (SError) as soon as it fetched pixels again. The EMI config block is ChromeOS's scpsys "emicfg-ao-mem".
++ */
++/ {
++	soc {
++		emicfg_ao_mem: syscon@10270000 {
++			compatible = "mediatek,mt8189-emicfg-ao-mem", "syscon";
++			reg = <0 0x10270000 0 0x1000>;
++		};
++	};
++};
++
+ /* GPU power domains (not in the Genio series' mt8189.dtsi): MFG0 > MFG1 > MFG2, MFG3, like MT8188, with ChromeOS's
+  * supplies (mfg0: vproc1 = GPU core rail, mfg1: vsram_proc1 = GPU SRAM rail) and MFG clocks. */
+ &spm {
+@@ -271,6 +287,7 @@ mfg1: power-domain@MT8189_POWER_DOMAIN_MFG1 {
+ 			clock-names = "mfg", "alt";
+ 			domain-supply = <&mt6359_vsram_proc1_ldo_reg>;
+ 			mediatek,infracfg = <&infra_ao>;
++			mediatek,smi = <&emicfg_ao_mem>;
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+ 			#power-domain-cells = <1>;
+diff --git a/drivers/gpu/drm/mediatek/mtk_dp.c b/drivers/gpu/drm/mediatek/mtk_dp.c
+index 580810d5f..37ecc2baa 100644
+--- a/drivers/gpu/drm/mediatek/mtk_dp.c
++++ b/drivers/gpu/drm/mediatek/mtk_dp.c
+@@ -3209,13 +3209,22 @@ static void mtk_dp_remove(struct platform_device *pdev)
+ }
+ 
+ #ifdef CONFIG_PM_SLEEP
++
+ static int mtk_dp_suspend(struct device *dev)
+ {
+ 	struct mtk_dp *mtk_dp = dev_get_drvdata(dev);
+ 
+-	mtk_dp_power_disable(mtk_dp);
+-	if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
+-		mtk_dp_hwirq_enable(mtk_dp, false);
++	/*
++	 * eDP TX v2 (MT8189): the bridge disable that precedes system sleep already powered the panel and the link
++	 * down, the way a display-off at runtime does; leave the port as it is, so that the next enable finds it as
++	 * after a runtime display-off. Powering it down further here (mtk_dp_power_disable(), PHY exit) left the AUX
++	 * channel timing out and the display stalled after resume.
++	 */
++	if (!mtk_dp->data->edp_ver) {
++		mtk_dp_power_disable(mtk_dp);
++		if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
++			mtk_dp_hwirq_enable(mtk_dp, false);
++	}
+ 	clk_disable_unprepare(mtk_dp->power_clk);
+ 	pm_runtime_put_sync(dev);
+ 
+@@ -3233,13 +3242,36 @@ static int mtk_dp_resume(struct device *dev)
+ 		dev_err(dev, "Failed to enable power clock: %d\n", ret);
+ 		return ret;
+ 	}
++
++	if (!mtk_dp->data->edp_ver) {
++		mtk_dp_init_port(mtk_dp);
++		if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
++			mtk_dp_hwirq_enable(mtk_dp, true);
++		mtk_dp_power_enable(mtk_dp);
++		return 0;
++	}
++
++	/*
++	 * eDP TX v2: if the sleep reset the block (TOP_MEM_PD keeps the value the boot-time AUX detection left, 0 after
++	 * a reset), set it up the way boot does: PHY, port, power, then that TOP_MEM_PD value.
++	 */
++	if (mtk_dp_read(mtk_dp, MTK_DP_TOP_MEM_PD) != 0)
++		return 0;
++
++	dev_info(dev, "eDP TX was reset over the sleep, setting it up again\n");
++	if (mtk_dp->phy && mtk_dp->phy->init_count) {
++		phy_exit(mtk_dp->phy);
++		ret = phy_init(mtk_dp->phy);
++		if (ret)
++			dev_err(dev, "Failed to initialize phy: %d\n", ret);
++	}
+ 	mtk_dp_init_port(mtk_dp);
+-	if (mtk_dp->bridge.type != DRM_MODE_CONNECTOR_eDP)
+-		mtk_dp_hwirq_enable(mtk_dp, true);
+ 	mtk_dp_power_enable(mtk_dp);
++	mtk_dp_write(mtk_dp, MTK_DP_TOP_MEM_PD, 0x550 | FUSE_SEL | MEM_ISO_EN);
+ 
+ 	return 0;
+ }
++
+ #endif
+ 
+ static SIMPLE_DEV_PM_OPS(mtk_dp_pm_ops, mtk_dp_suspend, mtk_dp_resume);
+diff --git a/drivers/pci/controller/pcie-mediatek-gen3.c b/drivers/pci/controller/pcie-mediatek-gen3.c
+index e2fb6e372..ec3d3d1d0 100644
+--- a/drivers/pci/controller/pcie-mediatek-gen3.c
++++ b/drivers/pci/controller/pcie-mediatek-gen3.c
+@@ -31,6 +31,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/reset.h>
++#include <linux/suspend.h>
+ 
+ #include "pci-host-common.h"
+ #include "../pci.h"
+@@ -1357,6 +1358,17 @@ static int mtk_pcie_suspend_noirq(struct device *dev)
+ 	struct mtk_gen3_pcie *pcie = dev_get_drvdata(dev);
+ 	int err;
+ 
++	/*
++	 * Suspend-to-idle (the only sleep MT8189 has): the bridge is supposed to stay in D0 and nothing restores
++	 * its configuration space afterwards, so keep its power and clocks (as ChromeOS does); the link can go to
++	 * L1.2 meanwhile. Powering it down here and up again on resume left accesses to the endpoint faulting
++	 * (SError) shortly after resume.
++	 */
++	if (pm_suspend_default_s2idle()) {
++		device_set_wakeup_path(dev);
++		return 0;
++	}
++
+ 	/* Trigger link to L2 state */
+ 	err = mtk_pcie_turn_off_link(pcie);
+ 	if (err) {
+@@ -1378,6 +1390,9 @@ static int mtk_pcie_resume_noirq(struct device *dev)
+ 	struct mtk_gen3_pcie *pcie = dev_get_drvdata(dev);
+ 	int err;
+ 
++	if (pm_suspend_default_s2idle())
++		return 0;
++
+ 	err = pcie->soc->power_up(pcie);
+ 	if (err)
+ 		return err;
+diff --git a/drivers/pmdomain/mediatek/mt8189-pm-domains.h b/drivers/pmdomain/mediatek/mt8189-pm-domains.h
+index c28b9460c..45abb66b4 100644
+--- a/drivers/pmdomain/mediatek/mt8189-pm-domains.h
++++ b/drivers/pmdomain/mediatek/mt8189-pm-domains.h
+@@ -322,6 +322,12 @@ static const struct scpsys_domain_data scpsys_domain_data_mt8189[] = {
+ 					MT8189_PROT_EN_MMSYS_STA_0_CLR,
+ 					MT8189_PROT_EN_MMSYS_STA_0_RDY),
+ 		},
++		/*
++		 * Always on: at runtime it never powers off (MMSYS, the mutex and the DVOs have no runtime PM), and the one
++		 * time genpd tries, in system suspend, the power-off fails part way (counted as rejected) and leaves the
++		 * display's memory path blocked: after resume OVL fetches stall (no vblank) or fault (SError).
++		 */
++		.caps = MTK_SCPD_ALWAYS_ON,
+ 	},
+ 	[MT8189_POWER_DOMAIN_MM_INFRA] = {
+ 		.name = "mm-infra",
+@@ -454,7 +460,7 @@ static const struct scpsys_domain_data scpsys_domain_data_mt8189[] = {
+ 		.pwr_sta2nd_offs = MT8189_SPM_PWR_STATUS_MSB_2ND,
+ 		.sram_pdn_bits = BIT(9),
+ 		.sram_pdn_ack_bits = 0,
+-		.caps = MTK_SCPD_SRAM_ISO | MTK_SCPD_SRAM_PDN_INVERTED,
++.caps = MTK_SCPD_SRAM_ISO | MTK_SCPD_SRAM_PDN_INVERTED,
+ 	},
+ 	[MT8189_POWER_DOMAIN_PCIE] = {
+ 		.name = "pcie",
+@@ -464,7 +470,7 @@ static const struct scpsys_domain_data scpsys_domain_data_mt8189[] = {
+ 		.pwr_sta2nd_offs = MT8189_SPM_PWR_STATUS_MSB_2ND,
+ 		.sram_pdn_bits = BIT(8),
+ 		.sram_pdn_ack_bits = BIT(12),
+-		.caps = MTK_SCPD_ACTIVE_WAKEUP,
++		.caps = MTK_SCPD_ACTIVE_WAKEUP | MTK_SCPD_ALWAYS_ON,
+ 	},
+ 	[MT8189_POWER_DOMAIN_PCIE_PHY] = {
+ 		.name = "pcie-phy",
+@@ -472,6 +478,7 @@ static const struct scpsys_domain_data scpsys_domain_data_mt8189[] = {
+ 		.ctl_offs = 0xf78,
+ 		.pwr_sta_offs = MT8189_SPM_PWR_STATUS_MSB,
+ 		.pwr_sta2nd_offs = MT8189_SPM_PWR_STATUS_MSB_2ND,
++		.caps = MTK_SCPD_ALWAYS_ON,
+ 	},
+ };
+ 
+diff --git a/drivers/usb/host/xhci-mtk.c b/drivers/usb/host/xhci-mtk.c
+index 60af5fe29..dfd16a522 100644
+--- a/drivers/usb/host/xhci-mtk.c
++++ b/drivers/usb/host/xhci-mtk.c
+@@ -108,6 +108,10 @@
+ #define WC0_IS_EN_P2_95		BIT(25)
+ #define WC0_IS_EN_P1_95		BIT(24)
+ 
++/* mt8189: the syscon-wakeup offset is per IP; one enable bit */
++#define PERI_WK_CTRL_8189	0x0
++#define WC_IS_EN_P_89		BIT(18)
++
+ #define PERI_WK_CTRL1_8195	0x20
+ #define WC1_IS_C_95(x)		((u32)(((x) & 0xf) << 28))
+ #define WC1_IS_P_95		BIT(12)
+@@ -129,6 +133,10 @@ enum ssusb_uwk_vers {
+ 	SSUSB_UWK_V1_4,		/* mt8195 IP1 */
+ 	SSUSB_UWK_V1_5,		/* mt8195 IP2 */
+ 	SSUSB_UWK_V1_6,		/* mt8195 IP3 */
++	SSUSB_UWK_V1_7,		/* mt8196 IP0 (not handled here, keeps ChromeOS's numbering) */
++	SSUSB_UWK_V1_8,		/* mt8196 IP1 */
++	SSUSB_UWK_V1_9,		/* mt8196 IP2 */
++	SSUSB_UWK_V1_10,	/* mt8189: one enable bit per IP, at that IP's own offset */
+ };
+ 
+ /*
+@@ -270,9 +278,13 @@ static int xhci_mtk_host_disable(struct xhci_hcd_mtk *mtk)
+ 	if (!mtk->has_ippc)
+ 		return 0;
+ 
+-	/* power down u3 ports except skipped ones */
++	/*
++	 * power down u3 ports except skipped ones. MT8189 IP0's one u3 port is masked (its lanes carry DisplayPort) but
++	 * left powered from reset, and the IP never reports sleep while it is: power the masked port down too.
++	 */
+ 	for (i = 0; i < mtk->num_u3_ports; i++) {
+-		if ((0x1 << i) & mtk->u3p_dis_msk)
++		if (((0x1 << i) & mtk->u3p_dis_msk) &&
++		    !of_device_is_compatible(mtk->dev->of_node, "mediatek,mt8189-xhci"))
+ 			continue;
+ 
+ 		value = readl(&ippc->u3_ctrl_p[i]);
+@@ -290,14 +302,20 @@ static int xhci_mtk_host_disable(struct xhci_hcd_mtk *mtk)
+ 		writel(value, &ippc->u2_ctrl_p[i]);
+ 	}
+ 
+-	/* power down host ip */
+-	value = readl(&ippc->ip_pw_ctr1);
+-	value |= CTRL1_IP_HOST_PDN;
+-	writel(value, &ippc->ip_pw_ctr1);
+-
+-	/* wait for host ip to sleep */
+-	ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
+-			  (value & STS1_IP_SLEEP_STS), 100, 100000);
++	/*
++	 * Power down the host IP and wait for it to sleep. MT8189's IP0 (USB-C port 0, USB3 masked) can need several
++	 * requests; ChromeOS retries up to 8 times.
++	 */
++	for (i = 1; i <= 8; i++) {
++		value = readl(&ippc->ip_pw_ctr1);
++		value |= CTRL1_IP_HOST_PDN;
++		writel(value, &ippc->ip_pw_ctr1);
++
++		ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
++				  (value & STS1_IP_SLEEP_STS), 100, 100000);
++		if (!ret)
++			break;
++	}
+ 	if (ret)
+ 		dev_err(mtk->dev, "ip sleep failed!!!\n");
+ 	else /* workaound for platforms using low level latch */
+@@ -381,6 +399,11 @@ static void usb_wakeup_ip_sleep_set(struct xhci_hcd_mtk *mtk, bool enable)
+ 		msk = WC0_IS_EN_P3_95 | WC0_IS_C_95(0x7) | WC0_IS_P_95;
+ 		val = enable ? (WC0_IS_EN_P3_95 | WC0_IS_C_95(0x1)) : 0;
+ 		break;
++	case SSUSB_UWK_V1_10:
++		reg = mtk->uwk_reg_base + PERI_WK_CTRL_8189;
++		msk = WC_IS_EN_P_89;
++		val = enable ? msk : 0;
++		break;
+ 	case SSUSB_UWK_V2:
+ 		reg = mtk->uwk_reg_base + PERI_SSUSB_SPM_CTRL;
+ 		msk = SSC_IP_SLEEP_EN | SSC_SPM_INT_EN;
+@@ -752,6 +775,15 @@ static int __maybe_unused xhci_mtk_suspend(struct device *dev)
+ 	}
+ 
+ 	ret = xhci_mtk_host_disable(mtk);
++	if (ret && of_device_is_compatible(dev->of_node, "mediatek,mt8189-xhci")) {
++		/*
++		 * The IP didn't report sleep: don't fail system suspend over it (ChromeOS doesn't), but keep its clocks
++		 * on. Gating an IP that is still awake ends in an SError when its interrupt handler next reads it.
++		 */
++		mtk->clks_kept = true;
++		usb_wakeup_set(mtk, true);
++		return 0;
++	}
+ 	if (ret)
+ 		goto restart_poll_rh;
+ 
+@@ -776,10 +808,13 @@ static int __maybe_unused xhci_mtk_resume(struct device *dev)
+ 	struct usb_hcd *hcd = mtk->hcd;
+ 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+ 	struct usb_hcd *shared_hcd = xhci->shared_hcd;
+-	int ret;
++	int ret = 0;
+ 
+ 	usb_wakeup_set(mtk, false);
+-	ret = clk_bulk_prepare_enable(BULK_CLKS_NUM, mtk->clks);
++	if (mtk->clks_kept)
++		mtk->clks_kept = false;
++	else
++		ret = clk_bulk_prepare_enable(BULK_CLKS_NUM, mtk->clks);
+ 	if (ret)
+ 		goto enable_wakeup;
+ 
+diff --git a/drivers/usb/host/xhci-mtk.h b/drivers/usb/host/xhci-mtk.h
+index 2274f5995..f12d364f3 100644
+--- a/drivers/usb/host/xhci-mtk.h
++++ b/drivers/usb/host/xhci-mtk.h
+@@ -166,6 +166,7 @@ struct xhci_hcd_mtk {
+ 	struct clk_bulk_data clks[BULK_CLKS_NUM];
+ 	struct regulator_bulk_data supplies[BULK_VREGS_NUM];
+ 	unsigned int has_ippc:1;
++	unsigned int clks_kept:1;	/* suspend kept the clocks on (the IP did not sleep) */
+ 	unsigned int lpm_support:1;
+ 	unsigned int u2_lpm_disable:1;
+ 	/* usb remote wakeup */
+-- 
+2.43.0
+

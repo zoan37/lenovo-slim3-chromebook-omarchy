@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * System sleep for quigon, as ChromeOS does it: the firmware has no PSCI SYSTEM_SUSPEND; suspend is s2idle, and the
+ * deepest idle state is a PSCI CPU_SUSPEND at system power level (0x20180ff). When the last CPU enters it, TF-A and the
+ * SPM put the SoC into its sleep state (DRAM self-refresh, wake sources armed, the EC sees the sleep signal). Its
+ * infinite min-residency keeps the runtime idle governor away from it; s2idle always picks the deepest state.
+ * From ChromeOS's mt8189.dtsi.
+ */
+
+&{/cpus/idle-states} {
+	cpu_s2idle: cpu-s2idle {
+		compatible = "arm,idle-state";
+		arm,psci-suspend-param = <0x020180ff>;
+		local-timer-stop;
+		entry-latency-us = <10000>;
+		exit-latency-us = <10000>;
+		min-residency-us = <0xffffffff>;
+	};
+};
+
+&cpu0 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu1 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu2 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu3 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu4 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu5 { cpu-idle-states = <&cpu_off_l &cpu_s2idle>; };
+&cpu6 { cpu-idle-states = <&cpu_off_b &cpu_s2idle>; };
+&cpu7 { cpu-idle-states = <&cpu_off_b &cpu_s2idle>; };

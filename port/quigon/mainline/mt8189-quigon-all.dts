@@ -10,3 +10,4 @@
 #include "mt8189-quigon-vcodec.dtsi"
 #include "mt8189-quigon-hdmi.dtsi"
 #include "mt8189-quigon-dp.dtsi"
+#include "mt8189-quigon-suspend.dtsi"
