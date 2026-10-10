@@ -67,7 +67,7 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
          onWakeRequested: root.runWake()
        }
  
-@@ -431,6 +437,28 @@
+@@ -431,6 +437,29 @@
      }
    }
  
@@ -79,7 +79,8 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 +    repeat: true
 +    running: root.lockRequested
 +    property double lastTick: 0
-+    onRunningChanged: lastTick = 0
++    // start the clock when the lock starts: a suspend right after locking (systemctl suspend) leaves no tick before it
++    onRunningChanged: lastTick = running ? Date.now() : 0
 +    onTriggered: {
 +      var now = Date.now()
 +      var gap = lastTick > 0 ? now - lastTick : 0
