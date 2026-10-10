@@ -126,16 +126,16 @@
 	};
 };
 
-/*
- * VDE0 sits under MM_INFRA (ChromeOS scp_subdomain_mt8189_spm). Only the basic (topckgen) clock, as for DISP in
- * mt8189-quigon-display.dtsi: the vdec larb gate ChromeOS also lists ("vdec-0") lives in this very domain, and
- * mtk-pm-domains gets every domain's clocks at probe.
- */
+/* VDE0 sits under MM_INFRA (ChromeOS scp_subdomain_mt8189_spm), with ChromeOS's two clocks. */
 &{/soc/syscon@1c001000/power-controller/power-domain@MT8189_POWER_DOMAIN_MM_INFRA} {
 	power-domain@MT8189_POWER_DOMAIN_VDE0 {
 		reg = <MT8189_POWER_DOMAIN_VDE0>;
-		clocks = <&topckgen CLK_TOP_VDEC_SEL>;
-		clock-names = "vdec";
+		/*
+		 * "vdec-0" (the larb4 gate) is a subsys clock: on during the power-on sequence and for as long as the
+		 * domain is up, as in ChromeOS (possible now that the vdec gate provider is no longer inside VDE0).
+		 */
+		clocks = <&topckgen CLK_TOP_VDEC_SEL>, <&vdec_core_clk CLK_VDEC_CORE_LARB_CKEN>;
+		clock-names = "vdec", "vdec-0";
 		mediatek,infracfg = <&infra_ao>;
 		#power-domain-cells = <0>;
 	};

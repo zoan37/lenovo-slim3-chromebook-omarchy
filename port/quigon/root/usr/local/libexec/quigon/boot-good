@@ -6,7 +6,9 @@ set -u
 root=$(findmnt -no SOURCE /)
 [[ $root == /dev/sda7 ]] || exit 0
 show() { quigon-cgpt show -i "$1" "$2" /dev/sda; }
-prio=$(( $(printf '%s\n' "$(show 2 -P)" "$(show 4 -P)" | sort -n | tail -1) + 1 ))
+# above ChromeOS's slots, but only those marked successful: an armed test kernel in KERN-B (quigon-test-kernel,
+# successful=0) must stay above KERN-C, or the firmware never tries it
+prio=$(( $(for i in 2 4; do [[ $(show $i -S) == 1 ]] && show $i -P; done | sort -n | tail -1) + 1 ))
 (( prio < $(show 6 -P) )) && prio=$(show 6 -P)
 quigon-cgpt add -i 6 -S 1 -T 0 -P "$prio" /dev/sda
 echo "quigon-boot-good: KERN-C successful, priority $prio"

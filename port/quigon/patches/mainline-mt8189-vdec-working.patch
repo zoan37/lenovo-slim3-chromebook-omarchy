@@ -1,0 +1,119 @@
+diff --git a/arch/arm64/boot/dts/mediatek/mt8189-quigon-vcodec.dtsi b/arch/arm64/boot/dts/mediatek/mt8189-quigon-vcodec.dtsi
+index 550c03011..e9f768eda 100644
+--- a/arch/arm64/boot/dts/mediatek/mt8189-quigon-vcodec.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt8189-quigon-vcodec.dtsi
+@@ -126,16 +126,16 @@ vdec_core_clk: clock-controller@1602f000 {
+ 	};
+ };
+ 
+-/*
+- * VDE0 sits under MM_INFRA (ChromeOS scp_subdomain_mt8189_spm). Only the basic (topckgen) clock, as for DISP in
+- * mt8189-quigon-display.dtsi: the vdec larb gate ChromeOS also lists ("vdec-0") lives in this very domain, and
+- * mtk-pm-domains gets every domain's clocks at probe.
+- */
++/* VDE0 sits under MM_INFRA (ChromeOS scp_subdomain_mt8189_spm), with ChromeOS's two clocks. */
+ &{/soc/syscon@1c001000/power-controller/power-domain@MT8189_POWER_DOMAIN_MM_INFRA} {
+ 	power-domain@MT8189_POWER_DOMAIN_VDE0 {
+ 		reg = <MT8189_POWER_DOMAIN_VDE0>;
+-		clocks = <&topckgen CLK_TOP_VDEC_SEL>;
+-		clock-names = "vdec";
++		/*
++		 * "vdec-0" (the larb4 gate) is a subsys clock: on during the power-on sequence and for as long as the
++		 * domain is up, as in ChromeOS (possible now that the vdec gate provider is no longer inside VDE0).
++		 */
++		clocks = <&topckgen CLK_TOP_VDEC_SEL>, <&vdec_core_clk CLK_VDEC_CORE_LARB_CKEN>;
++		clock-names = "vdec", "vdec-0";
+ 		mediatek,infracfg = <&infra_ao>;
+ 		#power-domain-cells = <0>;
+ 	};
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
+index de547594e..d5a7c39d2 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/mtk_vcodec_dec_drv.c
+@@ -395,6 +395,15 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
++	/*
++	 * As ChromeOS: the decoder's IOMMU port sits in an IOVA region above 4 GiB
++	 * (MT8189 larb4: region 1, 4-8 GiB, see dma-ranges). With the default 32-bit
++	 * mask its buffers can't be mapped where the hardware looks, and the faults
++	 * land in an IOMMU bank whose interrupt isn't enabled: the decoder just hangs.
++	 */
++	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(36));
++	if (ret)
++		return dev_err_probe(&pdev->dev, ret, "failed to set the DMA mask\n");
+ 
+ 	dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, DECODER);
+ 	if (IS_ERR(dev->fw_handler))
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
+index 65dfebf80..aefc47251 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/vdec/vdec_h264_req_multi_if.c
+@@ -170,9 +170,14 @@ struct vdec_h264_slice_info_ext {
+ 	u64 wdma_end_addr_offset;
+ 	u16 nal_info;
+ 	u16 timeout;
+-	u32 reserved;
+ 	u64 vdec_fb_va;
+ 	u32 crc[8];
++	/*
++	 * At the end, as in MediaTek's current firmware ABI (ChromeOS): with it
++	 * after timeout the slice parameters land 8 bytes before where the
++	 * MT8189 firmware reads them.
++	 */
++	u32 reserved;
+ };
+ 
+ /**
+diff --git a/drivers/thermal/mediatek/lvts_thermal.c b/drivers/thermal/mediatek/lvts_thermal.c
+index 3cd73acd3..529647423 100644
+--- a/drivers/thermal/mediatek/lvts_thermal.c
++++ b/drivers/thermal/mediatek/lvts_thermal.c
+@@ -11,6 +11,7 @@
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/iopoll.h>
++#include <linux/jiffies.h>
+ #include <linux/kernel.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
+@@ -195,8 +196,18 @@ struct lvts_ctrl {
+ 	int low_thresh;
+ 	int high_thresh;
+ 	bool fw_init;
++	unsigned long valid_after;
+ };
+ 
++/*
++ * A controller the driver set up itself (no firmware init) can still hold a
++ * measurement from before, e.g. from the ChromeOS kernel's driver across a warm
++ * reboot, with the valid bit set: read with this driver's calibration it can
++ * look critical and trip an emergency shutdown the moment the zone registers.
++ * Don't trust its readings until it has had time for fresh ones.
++ */
++#define LVTS_START_SETTLE_MS	200
++
+ struct lvts_domain {
+ 	struct lvts_ctrl *lvts_ctrl;
+ 	struct reset_control *reset;
+@@ -362,6 +373,9 @@ static int lvts_get_temp(struct thermal_zone_device *tz, int *temp)
+ 	u32 value;
+ 	int rc;
+ 
++	if (lvts_ctrl->valid_after && time_before(jiffies, lvts_ctrl->valid_after))
++		return -EAGAIN;
++
+ 	/*
+ 	 * Measurement registers:
+ 	 *
+@@ -1335,6 +1349,9 @@ static int lvts_ctrl_start(struct device *dev, struct lvts_ctrl *lvts_ctrl)
+ 	u32 *sensor_bitmap = lvts_ctrl->mode == LVTS_MSR_IMMEDIATE_MODE ?
+ 			     sensor_imm_bitmap : sensor_filt_bitmap;
+ 
++	if (!lvts_ctrl->fw_init)
++		lvts_ctrl->valid_after = jiffies + msecs_to_jiffies(LVTS_START_SETTLE_MS) ?: 1;
++
+ 	lvts_for_each_valid_sensor(i, lvts_ctrl) {
+ 
+ 		int dt_id = lvts_sensors[i].dt_id;

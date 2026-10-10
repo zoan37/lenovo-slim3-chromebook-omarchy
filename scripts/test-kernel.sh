@@ -1,7 +1,7 @@
 #!/bin/bash
 # test-kernel.sh <kernel-partition-image> [cmdline-file]
 #   Boot-once test slot: signs a kernel blob with the devkeys, writes it to KERN-B (ChromeOS's spare A/B slot; the
-#   original is backed up in /root/kern-backup/kern-b-chromeos.bin) and marks it priority 4, tries 1, not successful.
+#   original is backed up in /root/kern-backup/kern-b-chromeos.bin) and marks it highest priority (above KERN-A/C), tries 1, not successful.
 #   The next boot uses it exactly once; nothing marks it good, so the boot after falls back to KERN-C (Omarchy).
 #   A test kernel that hangs before its watchdog/panic=N kicks in needs a long press of the power button, then
 #   Omarchy comes back. Logs of a crashed test boot: /sys/fs/pstore after the warm reboot (ramoops at 0xffec5000,
@@ -36,7 +36,9 @@ fi
 size=$(stat -c %s $out); (( size <= 32 * 1024 * 1024 )) || { echo "test kernel is $size bytes, KERN-B holds 32 MiB"; exit 1; }
 futility vbutil_kernel --verify $out >/dev/null
 dd if=$out of=/dev/sda4 bs=1M conv=fsync status=none
-cgpt add -i 4 -P 4 -T 1 -S 0 /dev/sda
+# one above every other kernel slot (quigon-boot-good keeps raising KERN-C), so the firmware tries this one next
+p=$(( $(printf '%s\n' "$(cgpt show -i 2 -P /dev/sda)" "$(cgpt show -i 6 -P /dev/sda)" | sort -n | tail -1) + 1 ))
+cgpt add -i 4 -P "$p" -T 1 -S 0 /dev/sda
 echo "armed: next boot runs the test kernel once ($(numfmt --to=iec $size)); the one after falls back to KERN-C"
 # The reboot into the test kernel is intentional: don't let quigon-gpu-guard count this (possibly short) boot as an
 # unconfirmed GPU boot, or a few quick test rounds switch the GPU desktop off.

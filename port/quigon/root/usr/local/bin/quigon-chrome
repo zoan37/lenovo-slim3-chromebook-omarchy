@@ -1,26 +1,38 @@
 #!/bin/bash
-# Google Chrome on the Mali-G57, the way ChromeOS runs it: ANGLE's OpenGL ES backend on ChromeOS's libmali
-# (through the egl-mali-shim built as libEGL.so.1, which maps ANGLE's platform display onto libmali's default
-# display) and ChromeOS's minigbm (mediatek backend) for buffers, behind gbm-linear-shim (libgbm.so.1), which fixes
-# Chrome's gbm imports and NV12 allocations against minigbm. /opt/quigon-gpu/chrome-lib holds those.
-# Hardware video decode (H.264, VP9 profile 0) through VA-API on the MT8189 decoder: the patched v4l2_request driver
-# in /opt/quigon-gpu/va (scripts/build-libva-v4l2-request.sh). Off with /etc/quigon/no-video-decode.
-# Without /etc/quigon/gpu.env (GPU off) it runs Chrome unchanged.
+# Google Chrome on the Mali-G57.
+# ChromeOS kernel: the way ChromeOS runs it: ANGLE's OpenGL ES backend on ChromeOS's libmali (through the
+# egl-mali-shim built as libEGL.so.1, which maps ANGLE's platform display onto libmali's default display) and
+# ChromeOS's minigbm (mediatek backend) for buffers, behind gbm-linear-shim (libgbm.so.1), which fixes Chrome's gbm
+# imports and NV12 allocations against minigbm. /opt/quigon-gpu/chrome-lib holds those. Without /etc/quigon/gpu.env
+# (GPU off) it runs Chrome unchanged.
+# Mainline kernel (release *-quigon*): Chrome's own defaults on Mesa/Panfrost; nothing to swap in.
+# Both: hardware video decode (H.264, VP9 profile 0) through VA-API on the MT8189 decoder: the patched v4l2_request
+# driver in /opt/quigon-gpu/va (scripts/build-libva-v4l2-request.sh). Off with /etc/quigon/no-video-decode.
+flags=()
+mainline=0
+case "$(uname -r)" in *-quigon*) mainline=1 ;; esac
+
+if [[ -e /opt/quigon-gpu/va/v4l2_request_drv_video.so && ! -e /etc/quigon/no-video-decode ]]; then
+  export LIBVA_DRIVERS_PATH=/opt/quigon-gpu/va LIBVA_DRIVER_NAME=v4l2_request
+  # Chrome keeps only the last --enable-features/--disable-features, and google-chrome-stable puts
+  # ~/.config/chrome-flags.conf before these, so merge the user's lists in rather than override them.
+  conf=${XDG_CONFIG_HOME:-$HOME/.config}/chrome-flags.conf
+  user_en=$(grep -v '^#' "$conf" 2>/dev/null | grep -o -- '--enable-features=[^ ]*' | cut -d= -f2- | paste -sd,)
+  user_dis=$(grep -v '^#' "$conf" 2>/dev/null | grep -o -- '--disable-features=[^ ]*' | cut -d= -f2- | paste -sd,)
+  vaapi_en=(--enable-features=VaapiVideoDecoder,VaapiIgnoreDriverChecks,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL${user_en:+,$user_en})
+  vaapi_dis=(--disable-features=UseChromeOSDirectVideoDecoder${user_dis:+,$user_dis})
+fi
+
+if (( mainline )); then
+  exec /usr/bin/google-chrome-stable "${vaapi_en[@]}" "${vaapi_dis[@]}" "$@"
+fi
+
 if [[ -f /etc/quigon/gpu.env && -e /opt/quigon-gpu/chrome-lib/libEGL.so.1 ]]; then
   export LD_LIBRARY_PATH=/opt/quigon-gpu/chrome-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   export QUIGON_EGL_SHIM_EXE=none
   unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE
   flags=(--use-gl=angle --use-angle=gles)
-  if [[ -e /opt/quigon-gpu/va/v4l2_request_drv_video.so && ! -e /etc/quigon/no-video-decode ]]; then
-    export LIBVA_DRIVERS_PATH=/opt/quigon-gpu/va LIBVA_DRIVER_NAME=v4l2_request
-    # Chrome keeps only the last --enable-features/--disable-features, and google-chrome-stable puts
-    # ~/.config/chrome-flags.conf before these, so merge the user's lists in rather than override them.
-    conf=${XDG_CONFIG_HOME:-$HOME/.config}/chrome-flags.conf
-    user_en=$(grep -v '^#' "$conf" 2>/dev/null | grep -o -- '--enable-features=[^ ]*' | cut -d= -f2- | paste -sd,)
-    user_dis=$(grep -v '^#' "$conf" 2>/dev/null | grep -o -- '--disable-features=[^ ]*' | cut -d= -f2- | paste -sd,)
-    flags+=(--enable-features=VaapiVideoDecoder,VaapiIgnoreDriverChecks,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL${user_en:+,$user_en})
-    flags+=(--disable-features=UseChromeOSDirectVideoDecoder${user_dis:+,$user_dis})
-  fi
-  exec /usr/bin/google-chrome-stable "${flags[@]}" "$@"
+  exec /usr/bin/google-chrome-stable "${flags[@]}" "${vaapi_en[@]}" "${vaapi_dis[@]}" "$@"
 fi
+unset LIBVA_DRIVERS_PATH LIBVA_DRIVER_NAME
 exec /usr/bin/google-chrome-stable "$@"
