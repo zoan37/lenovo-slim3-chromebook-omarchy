@@ -33,7 +33,7 @@ Experimental device port, not an installer.
 | Firewall | **ufw on** (iptables-legacy; IPv6 rules patched, logging off: kernel lacks nftables, `xt_LOG`, `xt_hl`, `ip6t_rt`): [notes/personal-setup-20261008.md](notes/personal-setup-20261008.md#firewall-ufw-on-iptables-legacy-working-since-2026-10-09) |
 | Hardware video decode | **Works in Chrome** for H.264 and VP9 (profile 0): VA-API driver patched for the MediaTek decoder (MM21 detiled on the CPU, ~1.7 ms/frame) + a gbm shim for Chrome. 1080p60 VP9: Chrome ~0.5 core instead of ~2. No HEVC/10-bit yet. [notes/video-decode-20261009.md](notes/video-decode-20261009.md) |
 | SuzyQ debug cable | **Works** (home-made): GSC/AP/EC consoles over USB, kernel log + login on the AP UART, CCD opened (all capabilities Always), remote hard reset. [notes/suzyq-20261010.md](notes/suzyq-20261010.md) |
-| **Mainline kernel (default boot)** | **Works**: Panfrost GPU, UFS, Wi-Fi/BT, audio incl. HDMI, suspend (real s2idle, ~0.1 W), lid/keyboard wake, hardware cursor, HDMI up to 4K30 with hotplug, video decode, thermal, cpufreq. Not yet: camera, video encode, USB-C DP untested. [notes/mainline-20261009.md](notes/mainline-20261009.md#default-boot-2026-10-10) |
+| **Mainline kernel (default boot)** | **Works**: Panfrost GPU, UFS, Wi-Fi/BT, audio incl. HDMI, suspend (real s2idle, ~0.1 W), lid/keyboard wake, hardware cursor, HDMI up to 4K30 with hotplug, video decode and H.264 encode, camera, TPM, thermal, cpufreq; 20/20 sleep stress cycles. USB-C DP untested. [notes/mainline-20261009.md](notes/mainline-20261009.md#default-boot-2026-10-10) |
 | Hyprland + Omarchy | **Works**: Omarchy 4.0.4 (official aarch64 `edge` packages), uwsm session on seat0, NetworkManager: [notes/desktop-20261008.md](notes/desktop-20261008.md) |
 | GPU (Mali-G57 on kbase r54p1) | **On the GPU**: Hyprland, Chrome and every Electron app (auto-routed by `quigon-electron-sync`) on ChromeOS's own `libmali` GLES (RELR patch + EGL shim, + minigbm for Chromium); GTK 4 apps on libmali Vulkan via a patched ARM vulkan-wsi-layer; the Omarchy bar on libmali Vulkan (Qt Quick RHI, software fallback); other OpenGL apps via Zink; Ghostty via a patched private Zink. [notes/gpu-20261008.md](notes/gpu-20261008.md) |
 
@@ -64,7 +64,7 @@ Experimental device port, not an installer.
   + `xt_LOG`/`xt_recent`/`xt_multiport` (full ufw: logging, `limit`, port lists), `CONFIG_VT`/fbcon (boot console), maybe `CONFIG_HIBERNATION`. Sign with the devkeys like today's kernel.
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Mainline follow-ups: camera, video encode, USB-C DP with a monitor + DP audio, power tuning
+- Mainline follow-ups: USB-C DP with a monitor + DP audio, HDMI ELD, PCIe L1.2 in s2idle
   ([list](notes/mainline-20261009.md#to-do-on-mainline)).
 - Syncthing folders; hardware video decode (MediaTek vcodec) for Chrome; re-sync script for ChromeOS kernel/modules/firmware/
   libmali after ChromeOS updates; backup image of the USB stick.
