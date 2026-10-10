@@ -1,7 +1,8 @@
 #!/bin/bash
 # s2idle suspend/resume test: RTC wake after N seconds, then check the desktop came back.
 N=${1:-30}
-B=/sys/class/power_supply/sbs-10-000b
+# the smart battery: sbs-10-000b on the ChromeOS kernel, sbs-4-000b on mainline (I2C bus numbering)
+B=$(ls -d /sys/class/power_supply/sbs-* 2>/dev/null | head -1)
 log() { echo "$(date +%T) $*"; }
 U=${DESKTOP_USER:-$(systemctl list-units --plain --no-legend "quigon-desktop@*" | sed -n "s/^quigon-desktop@\(.*\)\.service.*/\1/p" | head -1)}; uid=$(id -u "$U"); sig=$(ls -t /run/user/$uid/hypr | head -1)
 E="env XDG_RUNTIME_DIR=/run/user/$uid HYPRLAND_INSTANCE_SIGNATURE=$sig DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus PATH=/usr/share/omarchy/bin:/usr/bin"

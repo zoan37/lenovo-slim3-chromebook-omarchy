@@ -1,0 +1,4 @@
+# Integrated camera (SunplusIT UVC): its anti-flicker setting defaults to 50 Hz; ChromeOS's camera service sets it
+# per region, plain Linux doesn't, so 60 Hz lighting can band. Mains here is 60 Hz (use 1 for 50 Hz regions).
+# uvcvideo restores the value over autosuspend and system sleep. Works under both kernels.
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_VENDOR_ID}=="5986", ENV{ID_MODEL_ID}=="2189", ENV{ID_V4L_CAPABILITIES}==":capture:", RUN+="/usr/bin/v4l2-ctl -d $devnode -c power_line_frequency=2"
