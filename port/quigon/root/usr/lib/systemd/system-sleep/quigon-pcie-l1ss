@@ -1,0 +1,13 @@
+#!/bin/sh
+# quigon (mainline kernel): the MT7922's PCIe link runs L1.2 while awake (~25-50 mW less than L1.1) but not across
+# s2idle: with L1.2 on, the SoC goes to sleep and never wakes (the EC sees S0->S3 and no way back; found on the SuzyQ
+# console). Drop to L1.1 before the sleep, back to L1.2 after. A suspend that bypasses systemd (writing /sys/power/state
+# directly) skips this hook: don't, with L1.2 on.
+case $(uname -r) in *-quigon*) ;; *) exit 0 ;; esac
+case $1 in pre) v=0 ;; post) v=1 ;; *) exit 0 ;; esac
+for d in /sys/bus/pci/devices/*; do
+  [ "$(cat "$d/vendor" 2>/dev/null)" = 0x14c3 ] && [ "$(cat "$d/device" 2>/dev/null)" = 0x0616 ] || continue
+  [ -w "$d/link/l1_2_aspm" ] || continue
+  echo $v > "$d/link/l1_2_aspm"; echo $v > "$d/link/l1_2_pcipm"
+done
+exit 0

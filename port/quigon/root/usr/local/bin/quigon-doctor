@@ -76,8 +76,13 @@ check_system() {
     [[ $(quigon-cgpt show -i 4 -T /dev/sda 2>/dev/null) -gt 0 || $held == test* ]] && pass "KERN-B armed ($held)" || fail "KERN-B has no tries left: the next boot is the ChromeOS kernel (quigon-kernel status / restore)"
     local l1=/sys/bus/pci/devices/0000:01:00.0/link
     if [[ -r $l1/l1_2_aspm ]]; then
-      [[ $(cat $l1/l1_2_aspm) == 0 ]] && pass "Wi-Fi PCIe link: L1.2 off (it hangs s2idle on mainline)$([[ $(cat $l1/l1_1_aspm) == 1 ]] && echo ", L1.1 on")" ||
-        fail "Wi-Fi PCIe link has L1.2 on: the next suspend will hang the SoC (echo 0 > $l1/l1_2_aspm)"
+      if [[ $(cat $l1/l1_2_aspm) == 0 ]]; then
+        pass "Wi-Fi PCIe link: L1.2 off$([[ $(cat $l1/l1_1_aspm) == 1 ]] && echo ", L1.1 on")"
+      elif [[ -x /usr/lib/systemd/system-sleep/quigon-pcie-l1ss ]]; then
+        pass "Wi-Fi PCIe link: L1.2 on while awake (the sleep hook drops it for s2idle, where it hangs the SoC)"
+      else
+        fail "Wi-Fi PCIe link has L1.2 on and no quigon-pcie-l1ss sleep hook: the next suspend will hang the SoC (echo 0 > $l1/l1_2_aspm)"
+      fi
     fi
     [[ -e /dev/tpm0 ]] && pass "GSC TPM (/dev/tpm0)" || fail "no /dev/tpm0 (Ti50 TPM, mt8189-quigon-tpm.dtsi / tpm_tis_i2c_cr50)"
     grep -qs "mtk-vcodec-enc" /sys/class/video4linux/video*/name && pass "hardware H.264 encoder" || fail "no mtk-vcodec-enc video device"

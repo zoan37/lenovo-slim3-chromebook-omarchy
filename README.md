@@ -64,7 +64,7 @@ Experimental device port, not an installer.
   + `xt_LOG`/`xt_recent`/`xt_multiport` (full ufw: logging, `limit`, port lists), `CONFIG_VT`/fbcon (boot console), maybe `CONFIG_HIBERNATION`. Sign with the devkeys like today's kernel.
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Mainline follow-up: PCIe L1.2 in s2idle
+- Mainline follow-up: why PCIe L1.2 hangs s2idle on mainline (worked around: L1.2 only while awake)
   ([list](notes/mainline-20261009.md#to-do-on-mainline)).
 - Syncthing folders; hardware video decode (MediaTek vcodec) for Chrome; re-sync script for ChromeOS kernel/modules/firmware/
   libmali after ChromeOS updates; backup image of the USB stick.
