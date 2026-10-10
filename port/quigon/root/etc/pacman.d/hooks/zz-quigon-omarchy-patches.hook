@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = omarchy
+
+[Action]
+Description = Re-applying quigon's Omarchy patches (lock screen wake key)...
+When = PostTransaction
+Exec = /usr/local/bin/quigon-omarchy-patches

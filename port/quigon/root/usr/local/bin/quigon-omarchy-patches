@@ -1,0 +1,21 @@
+#!/bin/bash
+# quigon-omarchy-patches: apply quigon's fixes to Omarchy's own files (/usr/share/omarchy) from
+# /usr/local/share/quigon/omarchy-patches/*.patch. Idempotent: a patch already in place is skipped; one that no longer
+# applies (Omarchy changed those lines, maybe fixed it upstream) is left out with a note, never forced. Run by the
+# zz-quigon-omarchy-patches pacman hook after every omarchy update, and by hand.
+set -uo pipefail
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+dir=/usr/local/share/quigon/omarchy-patches
+cd /usr/share/omarchy || exit 0
+for p in "$dir"/*.patch; do
+  [ -e "$p" ] || continue
+  name=$(basename "$p" .patch)
+  if patch -p1 -R --dry-run -s -f < "$p" >/dev/null 2>&1; then
+    echo "quigon-omarchy-patches: $name already applied"
+  elif patch -p1 --dry-run -s -f < "$p" >/dev/null 2>&1; then
+    patch -p1 -s -f --no-backup-if-mismatch < "$p" && echo "quigon-omarchy-patches: $name applied"
+  else
+    echo "quigon-omarchy-patches: $name no longer applies to this omarchy version, skipped (check whether it is fixed upstream)"
+  fi
+done
+exit 0
