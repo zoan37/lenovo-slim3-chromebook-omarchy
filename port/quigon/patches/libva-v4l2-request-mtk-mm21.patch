@@ -55,10 +55,15 @@ index d905a6b..293c958 100644
  		v4l2r_log("failed to allocate CAPTURE buffer #%u (%zu bytes; "
  			  "already %u buffers ~%llu MiB allocated): %s\n",
 diff --git i/src/convert.c w/src/convert.c
-index c117126..b993ac7 100644
+index c117126..fe73f06 100644
 --- i/src/convert.c
 +++ w/src/convert.c
-@@ -28,8 +28,10 @@
+@@ -25,11 +25,15 @@
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <poll.h>
++#include <pthread.h>
++#include <stdbool.h>
  #include <stdlib.h>
  #include <string.h>
  #include <sys/ioctl.h>
@@ -69,7 +74,7 @@ index c117126..b993ac7 100644
  #include <linux/videodev2.h>
  
  #include "v4l2_request.h"
-@@ -42,6 +44,186 @@
+@@ -42,6 +46,254 @@
  #define V4L2R_VPP_MIN_DIM 34
  #define V4L2R_VPP_MAX_DIM 8192
  
@@ -120,6 +125,74 @@ index c117126..b993ac7 100644
 +			for (; r < rows; r++, s += 16, d += dst_stride)
 +				memcpy(d, s, 16);
 +		}
++	}
++}
++
++/*
++ * Detile in horizontal bands of whole tile rows on several threads: a 4K MM21
++ * frame takes ~8.5 ms on one core, too much for a 60 fps decode thread that
++ * also waits on the decoder (Chrome dropped frames at 4K60). The caller takes
++ * the first band; a band whose thread can't be started runs inline.
++ */
++#define DETILE_THREADS 4
++
++struct detile_band {
++	const uint8_t *src;
++	uint32_t src_stride;
++	uint8_t *dst;
++	uint32_t dst_stride;
++	uint32_t width, height, tile_height;
++};
++
++static void *detile_band_run(void *arg)
++{
++	struct detile_band *b = arg;
++
++	detile_plane(b->src, b->src_stride, b->dst, b->dst_stride, b->width,
++		     b->height, b->tile_height);
++	return NULL;
++}
++
++static void detile_plane_mt(const uint8_t *src, uint32_t src_stride,
++			    uint8_t *dst, uint32_t dst_stride,
++			    uint32_t width, uint32_t height, uint32_t tile_height)
++{
++	uint32_t tile_rows = (height + tile_height - 1) / tile_height;
++	uint32_t per = (tile_rows + DETILE_THREADS - 1) / DETILE_THREADS;
++	struct detile_band bands[DETILE_THREADS];
++	pthread_t threads[DETILE_THREADS];
++	bool started[DETILE_THREADS] = { false };
++	unsigned int n = 0;
++
++	if (tile_rows < 2 * DETILE_THREADS) {
++		detile_plane(src, src_stride, dst, dst_stride, width, height,
++			     tile_height);
++		return;
++	}
++
++	for (uint32_t r0 = 0; r0 < tile_rows && n < DETILE_THREADS; r0 += per, n++) {
++		uint32_t y0 = r0 * tile_height;
++		uint32_t y1 = (r0 + per) * tile_height;
++
++		bands[n] = (struct detile_band) {
++			.src = src + (size_t)r0 * src_stride * tile_height,
++			.src_stride = src_stride,
++			.dst = dst + (size_t)y0 * dst_stride,
++			.dst_stride = dst_stride,
++			.width = width,
++			.height = (y1 < height ? y1 : height) - y0,
++			.tile_height = tile_height,
++		};
++	}
++	for (unsigned int i = 1; i < n; i++)
++		started[i] = pthread_create(&threads[i], NULL, detile_band_run,
++					    &bands[i]) == 0;
++	detile_band_run(&bands[0]);
++	for (unsigned int i = 1; i < n; i++) {
++		if (started[i])
++			pthread_join(threads[i], NULL);
++		else
++			detile_band_run(&bands[i]);
 +	}
 +}
 +
@@ -238,9 +311,9 @@ index c117126..b993ac7 100644
 +		width = backing->width;
 +	if (width > backing->pitch)
 +		width = backing->pitch & ~15u;
-+	detile_plane(y, y_stride, dst, backing->pitch, width,
++	detile_plane_mt(y, y_stride, dst, backing->pitch, width,
 +		     height < backing->height ? height : backing->height, 32);
-+	detile_plane(uv, uv_stride, dst + (size_t)backing->pitch * backing->height,
++	detile_plane_mt(uv, uv_stride, dst + (size_t)backing->pitch * backing->height,
 +		     backing->pitch, width,
 +		     (height < backing->height ? height : backing->height) / 2, 16);
 +
@@ -256,7 +329,7 @@ index c117126..b993ac7 100644
  VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
  {
  	struct v4l2r_driver *drv = ctx->drv;
-@@ -52,6 +234,11 @@ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
+@@ -52,6 +304,11 @@ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
  	uint32_t width = v4l2r_format_width(&ctx->capture_format);
  	uint32_t height = v4l2r_format_height(&ctx->capture_format);
  
@@ -268,7 +341,7 @@ index c117126..b993ac7 100644
  	if (!v4l2r_converter_supports(drv, src_pixelformat))
  		return VA_STATUS_ERROR_OPERATION_FAILED;
  
-@@ -167,7 +354,8 @@ void v4l2r_convert_destroy(struct v4l2r_context *ctx)
+@@ -167,7 +424,8 @@ void v4l2r_convert_destroy(struct v4l2r_context *ctx)
  
  	/* Closing the fd tears down the m2m context including any queued
  	 * jobs; importer-side dma-buf references are dropped with it. */
@@ -278,7 +351,7 @@ index c117126..b993ac7 100644
  	free(conv);
  	ctx->conv = NULL;
  }
-@@ -258,6 +446,11 @@ void v4l2r_convert_kick(struct v4l2r_context *ctx, int capture_index)
+@@ -258,6 +516,11 @@ void v4l2r_convert_kick(struct v4l2r_context *ctx, int capture_index)
  	if (!surface)
  		return;
  

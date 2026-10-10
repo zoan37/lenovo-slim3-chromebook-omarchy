@@ -2,7 +2,8 @@
 # Hardware video decode for Chrome: the VA-API driver for V4L2 stateless decoders (sofus13's libva-v4l2_request 1.3,
 # the source of Omarchy's libva-v4l2_request-avd package) with port/quigon/patches/libva-v4l2-request-mtk-mm21.patch,
 # which makes it work on mtk-vcodec-dec (MT8189 decoder: stateless H.264/VP9/HEVC, MM21-only output):
-#   - MM21 frames detiled to NV12 on the CPU (NEON, ~1.7 ms per 1080p frame) into dma-heap NV12 surfaces
+#   - MM21 frames detiled to NV12 on the CPU (NEON, 4 threads: ~4 ms per 4K frame, was 8.5 single-threaded) into
+#     dma-heap NV12 surfaces
 #   - CAPTURE buffers allocated non-coherent (cached) so the read-back is fast
 #   - multi-planar CAPTURE QBUF/DQBUF (MM21 has two planes)
 #   - H.264 DPB pic_num = PicNum (FrameNumWrap), without which references go wrong after frame_num wraps
