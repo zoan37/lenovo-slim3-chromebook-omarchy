@@ -4,6 +4,8 @@
  * Realtek RTS5411 hub behind the external ports; XHCI4 (XS-PHY port 4) carries the MT7922's Bluetooth. Mainline
  * mtk-xhci binds on the generic "mediatek,mtk-xhci". The hub needs no DT node (its supply, pp3300_s3, is always on).
  * USB-A VBUS (pp5000_usb) is switched by GPIO 131 ("USB_INIT_DONE"); without it nothing on the A ports enumerates.
+ * XHCI0-2 (XS-PHY ports 0-2, USB2 only), as ChromeOS enables them: XHCI2's VBUS is the USB camera's 3.3 V
+ * (ChromeOS calls the MT6359 VCN33_2 LDO "pp3300_ucam_x"), XHCI1's is pp3300_s3.
  */
 #include <dt-bindings/phy/phy.h>
 
@@ -59,6 +61,112 @@
 			};
 		};
 
+		u3phy0: xs-phy@11e80000 {
+			compatible = "mediatek,mt8189-xsphy", "mediatek,xsphy";
+			reg = <0 0x11e83000 0 0x200>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			u2port0: usb-phy@11e80000 {
+				reg = <0 0x11e80000 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P0_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+		};
+
+		u2phy1: xs-phy@11e90000 {
+			compatible = "mediatek,mt8189-xsphy", "mediatek,xsphy";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			u2port1: usb-phy@11e90000 {
+				reg = <0 0x11e90000 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P1_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+		};
+
+		u2phy2: xs-phy@11ef0000 {
+			compatible = "mediatek,mt8189-xsphy", "mediatek,xsphy";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			u2port2: usb-phy@11ef0000 {
+				reg = <0 0x11ef0000 0 0x700>;
+				clocks = <&topckgen CLK_TOP_USB2_PHY_RF_P2_EN>;
+				clock-names = "ref";
+				#phy-cells = <1>;
+			};
+		};
+
+		xhci0: usb@11200000 {
+			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
+			reg = <0 0x11200000 0 0x1000>,
+			      <0 0x11203e00 0 0x0100>;
+			reg-names = "mac", "ippc";
+			interrupts = <GIC_SPI 385 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "host";
+			phys = <&u2port0 PHY_TYPE_USB2>;
+			clocks = <&peri_ao CLK_PERAO_SSUSB0_SYS>,
+				 <&peri_ao CLK_PERAO_SSUSB0_REF>,
+				 <&peri_ao CLK_PERAO_SSUSB0_H>,
+				 <&peri_ao CLK_PERAO_SSUSB0_F>,
+				 <&peri_ao CLK_PERAO_SSUSB0_XHCI>,
+				 <&peri_ao CLK_PERAO_SSUSB0_FRMCNT>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+			mediatek,u3p-dis-msk = <0x1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		xhci1: usb@11210000 {
+			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
+			reg = <0 0x11210000 0 0x1000>,
+			      <0 0x11213e00 0 0x0100>;
+			reg-names = "mac", "ippc";
+			interrupts = <GIC_SPI 386 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "host";
+			phys = <&u2port1 PHY_TYPE_USB2>;
+			clocks = <&peri_ao CLK_PERAO_SSUSB1_SYS>,
+				 <&peri_ao CLK_PERAO_SSUSB1_REF>,
+				 <&peri_ao CLK_PERAO_SSUSB1_H>,
+				 <&peri_ao CLK_PERAO_SSUSB1_F>,
+				 <&peri_ao CLK_PERAO_SSUSB1_XHCI>,
+				 <&peri_ao CLK_PERAO_SSUSB1_FRMCNT>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
+			vbus-supply = <&pp3300_s3>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		xhci2: usb@11220000 {
+			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
+			reg = <0 0x11220000 0 0x1000>,
+			      <0 0x11223e00 0 0x0100>;
+			reg-names = "mac", "ippc";
+			interrupts = <GIC_SPI 472 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "host";
+			phys = <&u2port2 PHY_TYPE_USB2>;
+			clocks = <&peri_ao CLK_PERAO_SSUSB2_SYS>,
+				 <&peri_ao CLK_PERAO_SSUSB2_REF>,
+				 <&peri_ao CLK_PERAO_SSUSB2_H>,
+				 <&peri_ao CLK_PERAO_SSUSB2_F>,
+				 <&peri_ao CLK_PERAO_SSUSB2_XHCI>,
+				 <&peri_ao CLK_PERAO_SSUSB2_FRMCNT>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck", "frmcnt_ck";
+			power-domains = <&spm MT8189_POWER_DOMAIN_SSUSB>;
+			/* the USB camera's 3.3 V (ChromeOS: pp3300_ucam_x) */
+			vbus-supply = <&mt6359_vcn33_2_ldo_reg>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
 		xhci3: usb@11260000 {
 			compatible = "mediatek,mt8189-xhci", "mediatek,mtk-xhci";
 			reg = <0 0x11260000 0 0x2e00>,
@@ -108,4 +216,9 @@
 			output-high;
 		};
 	};
+};
+
+&mt6359_vcn33_2_ldo_reg {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
 };
