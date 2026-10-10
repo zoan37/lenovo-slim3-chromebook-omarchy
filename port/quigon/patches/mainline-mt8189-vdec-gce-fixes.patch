@@ -1,0 +1,145 @@
+diff --git a/drivers/clk/mediatek/clk-mt8189-vcodec.c b/drivers/clk/mediatek/clk-mt8189-vcodec.c
+index 04b45c197..7e0a756f1 100644
+--- a/drivers/clk/mediatek/clk-mt8189-vcodec.c
++++ b/drivers/clk/mediatek/clk-mt8189-vcodec.c
+@@ -25,13 +25,24 @@ static const struct mtk_gate_regs vdec_core1_cg_regs = {
+ 	.sta_ofs = 0x8,
+ };
+ 
++/*
++ * The vdec gates live in the VDE0 power domain but, as on ChromeOS, the
++ * provider does no runtime PM: their users (decoder core, larb4) power VDE0
++ * before enabling them. Runtime PM here (resuming the provider from inside
++ * clk_prepare, under the prepare lock, while larb4 resumes VDE0 and prepares
++ * clocks under the genpd lock) left the decoder resuming with its clocks off
++ * and then wedged the clock framework. CLK_IGNORE_UNUSED keeps
++ * clk_disable_unused() from touching them while VDE0 is off.
++ */
+ #define GATE_VDEC_CORE0(_id, _name, _parent, _shift)			\
+ 	GATE_MTK_FLAGS(_id, _name, _parent, &vdec_core0_cg_regs, _shift,	\
+-		       &mtk_clk_gate_ops_setclr_inv, CLK_OPS_PARENT_ENABLE)
++		       &mtk_clk_gate_ops_setclr_inv,			\
++		       CLK_OPS_PARENT_ENABLE | CLK_IGNORE_UNUSED)
+ 
+ #define GATE_VDEC_CORE1(_id, _name, _parent, _shift)			\
+ 	GATE_MTK_FLAGS(_id, _name, _parent, &vdec_core1_cg_regs, _shift,	\
+-		       &mtk_clk_gate_ops_setclr_inv, CLK_OPS_PARENT_ENABLE)
++		       &mtk_clk_gate_ops_setclr_inv,			\
++		       CLK_OPS_PARENT_ENABLE | CLK_IGNORE_UNUSED)
+ 
+ static const struct mtk_gate vdec_core_clks[] = {
+ 	/* VDEC_CORE0 */
+@@ -44,8 +55,6 @@ static const struct mtk_gate vdec_core_clks[] = {
+ static const struct mtk_clk_desc vdec_core_desc = {
+ 	.clks = vdec_core_clks,
+ 	.num_clks = ARRAY_SIZE(vdec_core_clks),
+-	/* registers live in the VDE0 power domain: power it for every access */
+-	.need_runtime_pm = true,
+ };
+ 
+ static const struct mtk_gate_regs ven1_cg_regs = {
+diff --git a/drivers/mailbox/mtk-cmdq-mailbox.c b/drivers/mailbox/mtk-cmdq-mailbox.c
+index e523c84b4..ca04f1f3c 100644
+--- a/drivers/mailbox/mtk-cmdq-mailbox.c
++++ b/drivers/mailbox/mtk-cmdq-mailbox.c
+@@ -98,6 +98,7 @@ struct gce_plat {
+ 	dma_addr_t mminfra_offset;
+ 	bool control_by_sw;
+ 	bool sw_ddr_en;
++	bool ddr_always_on;
+ 	bool gce_vm;
+ 	u32 gce_num;
+ };
+@@ -396,7 +397,13 @@ static int cmdq_runtime_suspend(struct device *dev)
+ {
+ 	struct cmdq *cmdq = dev_get_drvdata(dev);
+ 
+-	cmdq_gctl_value_toggle(cmdq, false);
++	/*
++	 * Some GCEs also run command lists for coprocessors (the MT8189 SCP
++	 * drives the video decoder through the media GCE) that Linux never
++	 * sees: keep their DRAM access on even with no Linux client.
++	 */
++	if (!cmdq->pdata->ddr_always_on)
++		cmdq_gctl_value_toggle(cmdq, false);
+ 	clk_bulk_disable(cmdq->pdata->gce_num, cmdq->clocks);
+ 	return 0;
+ }
+@@ -823,6 +830,15 @@ static const struct gce_plat gce_plat_mt8188 = {
+ 	.gce_num = 2
+ };
+ 
++static const struct gce_plat gce_plat_mt8189 = {
++	.thread_nr = 32,
++	.shift = 3,
++	.mminfra_offset = SZ_1G,
++	.sw_ddr_en = true,
++	.ddr_always_on = true,
++	.gce_num = 2
++};
++
+ static const struct gce_plat gce_plat_mt8192 = {
+ 	.thread_nr = 24,
+ 	.shift = 3,
+@@ -853,6 +869,7 @@ static const struct of_device_id cmdq_of_ids[] = {
+ 	{.compatible = "mediatek,mt8183-gce", .data = (void *)&gce_plat_mt8183},
+ 	{.compatible = "mediatek,mt8186-gce", .data = (void *)&gce_plat_mt8186},
+ 	{.compatible = "mediatek,mt8188-gce", .data = (void *)&gce_plat_mt8188},
++	{.compatible = "mediatek,mt8189-gce", .data = (void *)&gce_plat_mt8189},
+ 	{.compatible = "mediatek,mt8192-gce", .data = (void *)&gce_plat_mt8192},
+ 	{.compatible = "mediatek,mt8195-gce", .data = (void *)&gce_plat_mt8195},
+ 	{.compatible = "mediatek,mt8196-gce", .data = (void *)&gce_plat_mt8196},
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/vdec_ipi_msg.h b/drivers/media/platform/mediatek/vcodec/decoder/vdec_ipi_msg.h
+index c2c2a3a63..2509c0de6 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/vdec_ipi_msg.h
++++ b/drivers/media/platform/mediatek/vcodec/decoder/vdec_ipi_msg.h
+@@ -55,11 +55,13 @@ struct vdec_ap_ipi_cmd {
+  * @msg_id	: vdec_ipi_msgid
+  * @status	: VPU execution result
+  * @ap_inst_addr	: AP video decoder instance address
++ * @shared_iova	: reserved shared memory address (VCP firmware; 0 otherwise)
+  */
+ struct vdec_vpu_ipi_ack {
+ 	uint32_t msg_id;
+ 	int32_t status;
+ 	uint64_t ap_inst_addr;
++	u64 shared_iova;
+ };
+ 
+ /**
+@@ -67,11 +69,17 @@ struct vdec_vpu_ipi_ack {
+  * @msg_id	: AP_IPIMSG_DEC_INIT
+  * @codec_type	: codec fourcc
+  * @ap_inst_addr	: AP video decoder instance address
++ * @shared_iova	: reserved shared memory address (VCP firmware; 0 otherwise)
++ *
++ * The current MediaTek firmware (MT8189 scp.img, as used by ChromeOS) takes
++ * this 24-byte layout. Sent as 16 bytes, it reads shared_iova from whatever its
++ * receive buffer held, and the core never completes a frame.
+  */
+ struct vdec_ap_ipi_init {
+ 	uint32_t msg_id;
+ 	u32 codec_type;
+ 	uint64_t ap_inst_addr;
++	uint64_t shared_iova;
+ };
+ 
+ /**
+diff --git a/drivers/media/platform/mediatek/vcodec/decoder/vdec_vpu_if.c b/drivers/media/platform/mediatek/vcodec/decoder/vdec_vpu_if.c
+index b35759a0b..6fae7f184 100644
+--- a/drivers/media/platform/mediatek/vcodec/decoder/vdec_vpu_if.c
++++ b/drivers/media/platform/mediatek/vcodec/decoder/vdec_vpu_if.c
+@@ -174,6 +174,13 @@ static int vcodec_vpu_send_msg(struct vdec_vpu_inst *vpu, void *msg, int len)
+ 	if (err) {
+ 		mtk_vdec_err(vpu->ctx, "send fail vpu_id=%d msg_id=%X status=%d",
+ 			     id, msgid, err);
++		/*
++		 * The firmware acks a decode only once the core is done, so an
++		 * ack timeout is a hang like a missing interrupt: treat it the
++		 * same (keep the engine powered, see hw_hung).
++		 */
++		if (err == -EIO || err == -ETIMEDOUT)
++			vpu->ctx->dev->hw_hung = true;
+ 		return err;
+ 	}
+ 

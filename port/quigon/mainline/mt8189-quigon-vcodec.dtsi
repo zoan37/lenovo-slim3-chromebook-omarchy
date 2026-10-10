@@ -11,7 +11,39 @@
 #include <dt-bindings/memory/mediatek,mt8189-memory-port.h>
 
 / {
+	aliases {
+		/* mtk-cmdq-mailbox finds both GCEs by these to enable each one's clock */
+		gce0 = &gce_d;
+		gce1 = &gce_m;
+	};
+
 	soc {
+		/*
+		 * The two GCEs (command queue engines), from ChromeOS's mt8189.dtsi. The SCP firmware programs
+		 * the video decoder through GCE command lists; the GCE driver turns on their DRAM access
+		 * (GCE_GCTL_VALUE DDR_EN) and slot cycles at probe. Without them the media GCE can't fetch the
+		 * firmware's commands and the decoder never completes a frame.
+		 */
+		gce_d: mailbox@1e980000 {
+			compatible = "mediatek,mt8189-gce";
+			reg = <0 0x1e980000 0 0x4000>;
+			interrupts = <GIC_SPI 290 IRQ_TYPE_LEVEL_HIGH 0>;
+			#mbox-cells = <2>;
+			clocks = <&mminfra CLK_MMINFRA_GCE_D>, <&mminfra CLK_MMINFRA_GCE_26M>;
+			clock-names = "gce0", "gce-timer";
+			power-domains = <&spm MT8189_POWER_DOMAIN_MM_INFRA>;
+		};
+
+		gce_m: mailbox@1e990000 {
+			compatible = "mediatek,mt8189-gce";
+			reg = <0 0x1e990000 0 0x4000>;
+			interrupts = <GIC_SPI 286 IRQ_TYPE_LEVEL_HIGH 0>;
+			#mbox-cells = <2>;
+			clocks = <&mminfra CLK_MMINFRA_GCE_M>, <&mminfra CLK_MMINFRA_GCE_26M>;
+			clock-names = "gce1", "gce-timer";
+			power-domains = <&spm MT8189_POWER_DOMAIN_MM_INFRA>;
+		};
+
 		scp: scp@1c400000 {
 			compatible = "mediatek,mt8189-scp";
 			reg = <0 0x1c400000 0 0x60000>,
@@ -85,8 +117,10 @@
 		vdec_core_clk: clock-controller@1602f000 {
 			compatible = "mediatek,mt8189-vdec-core";
 			reg = <0 0x1602f000 0 0x1000>;
-			/* the gates live in VDE0: the clock driver powers it (runtime PM) for every access */
-			power-domains = <&spm MT8189_POWER_DOMAIN_VDE0>;
+			/*
+			 * The gates live in VDE0, but as on ChromeOS the provider has no power domain: its users power
+			 * VDE0 first. Giving it one (runtime PM inside clk_prepare) wedged the clock framework.
+			 */
 			#clock-cells = <1>;
 		};
 	};
