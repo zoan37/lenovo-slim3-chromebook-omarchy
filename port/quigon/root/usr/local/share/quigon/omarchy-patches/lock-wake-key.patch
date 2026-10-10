@@ -1,27 +1,32 @@
 Lock screen: a key pressed while the lock has blanked the panel only wakes it (is not typed into the password),
-and the panel is woken on resume. Port of omarchy PR #9211 (not merged as of 2026-10-07) to omarchy 4.0.4.
+and the panel is woken on resume. Port of omarchy PR #9211 (not merged as of 2026-10-07) to omarchy 4.0.4, plus a resume guard: a key
+arriving >3 s after the lock's last 1 s heartbeat (the shell was frozen through a suspend) is swallowed too.
 Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 
 --- a/shell/plugins/lock/LockView.qml
 +++ b/shell/plugins/lock/LockView.qml
-@@ -16,6 +16,8 @@
+@@ -16,6 +16,11 @@
    property bool loadBackground: true
    property string passwordText: ""
    property bool syncingPasswordText: false
 +  // quigon (from omarchy PR #9211): set while the lock has blanked the panel
 +  property bool displaysBlank: false
++  // quigon: wall-clock time of the lock's last 1 s heartbeat; a key arriving long after it comes from the sleep the
++  // shell was frozen through (the wake key), whichever of the key and the first post-resume tick is handled first
++  property double aliveTick: 0
  
    readonly property string placeholderText: "Enter Password"
    readonly property int fieldWidth: 381
-@@ -175,7 +177,14 @@
+@@ -175,7 +180,15 @@
          }
  
          Keys.onPressed: function(event) {
 +          // A key hit at a dark panel is there to wake it, not to type (quigon, from omarchy PR #9211).
 +          // The wake clears displaysBlank, so read it first.
 +          var wasBlank = root.displaysBlank
++          var justResumed = root.aliveTick > 0 && Date.now() - root.aliveTick > 3000
            root.wakeRequested()
-+          if (wasBlank) {
++          if (wasBlank || justResumed) {
 +            event.accepted = true
 +            return
 +          }
@@ -53,15 +58,16 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
      if (!blankProcess.running) blankProcess.running = true
    }
  
-@@ -280,6 +284,7 @@
+@@ -280,6 +284,8 @@
          onPasswordTextEdited: function(password) { root.enteredPassword = password }
          onSubmitPassword: function(password) { root.submitPassword(password) }
          onClearFailureRequested: root.failureMessage = ""
 +        displaysBlank: root.displaysBlank
++        aliveTick: resumeWatchTimer.lastTick
          onWakeRequested: root.runWake()
        }
  
-@@ -431,6 +436,26 @@
+@@ -431,6 +437,28 @@
      }
    }
  
@@ -76,7 +82,9 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 +    onRunningChanged: lastTick = 0
 +    onTriggered: {
 +      var now = Date.now()
-+      var resumed = lastTick > 0 && now - lastTick > interval + 2000
++      var gap = lastTick > 0 ? now - lastTick : 0
++      var resumed = gap > interval + 2000
++      if (gap > interval + 500) root.logEvent("tick-gap=" + gap)
 +      lastTick = now
 +      if (resumed) {
 +        root.logEvent("resume-detected")
