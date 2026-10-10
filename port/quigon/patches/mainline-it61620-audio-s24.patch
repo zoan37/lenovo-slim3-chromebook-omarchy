@@ -1,0 +1,32 @@
+From 778c8a798593d5a45c6f22b897777c1458e655e9 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 14:03:06 -0400
+Subject: [PATCH] drm/bridge: it61620: offer only S24_LE audio (the AFE PCM
+ frame only lines up with 24-bit; PipeWire picked S32 and was rejected, 16-bit
+ plays garbled)
+
+---
+ drivers/gpu/drm/bridge/ite-it61620.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/gpu/drm/bridge/ite-it61620.c b/drivers/gpu/drm/bridge/ite-it61620.c
+index dd6141769..ba8962ec6 100644
+--- a/drivers/gpu/drm/bridge/ite-it61620.c
++++ b/drivers/gpu/drm/bridge/ite-it61620.c
+@@ -2732,6 +2732,13 @@ static int it61620_hdmi_register_audio_driver(struct device *dev)
+ 	struct it61620 *it61620 = dev_get_drvdata(dev);
+ 	struct hdmi_codec_pdata codec_data = {
+ 		.ops = &it61620_audio_codec_ops,
++		/*
++		 * The AFE PCM interface feeding the bridge sends the same frame
++		 * whatever the sample format; only 24-bit samples line up with
++		 * it (16-bit plays garbled, 32-bit is rejected below). Offer just
++		 * that, and let userspace convert.
++		 */
++		.i2s_formats = SNDRV_PCM_FMTBIT_S24_LE,
+ 		.max_i2s_channels = 8,
+ 		.i2s = 1,
+ 		.data = it61620,
+-- 
+2.43.0
+
