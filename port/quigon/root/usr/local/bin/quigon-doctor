@@ -127,9 +127,22 @@ check_system() {
   else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi
   local lid=ok s
   for s in omarchy-hw-laptop-closed omarchy-system-lid-close omarchy-hyprland-monitor-clamshell; do
-    [[ -x /usr/local/bin/$s && -x /usr/bin/$s ]] || lid="$s (quigon shim in /usr/local/bin or Omarchy's in /usr/bin) missing"
+    [[ -x /usr/local/bin/$s && ( -x /usr/share/omarchy/bin/$s || -x /usr/bin/$s ) ]] ||
+      lid="$s (quigon shim in /usr/local/bin or Omarchy's own) missing"
   done
   [[ $lid == ok ]] && pass "lid close locks and blanks (SW_LID shims)" || fail "lid: $lid; a lid close won't lock"
+  # quigon's patches to Omarchy's own files (lock screen wake key); re-applied by a pacman hook after omarchy updates
+  local pout
+  pout=$(/usr/local/bin/quigon-omarchy-patches 2>&1)
+  if grep -q "no longer applies" <<<"$pout"; then fail "Omarchy patch: $(grep "no longer applies" <<<"$pout" | head -1)"
+  else pass "Omarchy patches in place (lock screen wake key)"; fi
+  # a Wi-Fi profile pinned to one interface name breaks when the names swap: the USB dongle is wlan0 under mainline,
+  # the built-in Wi-Fi is wlan0 under the ChromeOS kernel
+  local pinned
+  pinned=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | awk -F: '$2=="802-11-wireless"{print $1}' |
+    while read -r c; do [[ -n $(nmcli -g connection.interface-name con show "$c" 2>/dev/null) ]] && echo x; done | wc -l)
+  (( pinned == 0 )) && pass "Wi-Fi profiles not pinned to an interface (built-in and dongle both work)" ||
+    fail "$pinned Wi-Fi profile(s) pinned to an interface name: nmcli con mod <name> connection.interface-name \"\""
 }
 
 check_session() {
