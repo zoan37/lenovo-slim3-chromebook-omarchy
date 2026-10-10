@@ -10,8 +10,8 @@ the internal drive. Experimental device port, not an installer.
 
 ## Two kernels, one Omarchy
 
-**I use the mainline (custom) kernel day to day**: it's this Chromebook's default boot, and everything below the
-"Mainline kernel" column is what that daily setup does. The ChromeOS kernel stays installed only as the automatic
+**I use the mainline (custom) kernel day to day**: it's this Chromebook's default boot, and the "Mainline kernel" column below is what that daily setup
+does. The ChromeOS kernel stays installed only as the automatic
 fallback.
 
 The same Omarchy install (ROOT-C on the internal drive) runs on either of two kernels:
