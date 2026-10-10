@@ -55,10 +55,10 @@ index d905a6b..293c958 100644
  		v4l2r_log("failed to allocate CAPTURE buffer #%u (%zu bytes; "
  			  "already %u buffers ~%llu MiB allocated): %s\n",
 diff --git i/src/convert.c w/src/convert.c
-index c117126..fe73f06 100644
+index c117126..92c156d 100644
 --- i/src/convert.c
 +++ w/src/convert.c
-@@ -25,11 +25,15 @@
+@@ -25,14 +25,19 @@
  #include <errno.h>
  #include <fcntl.h>
  #include <poll.h>
@@ -74,7 +74,11 @@ index c117126..fe73f06 100644
  #include <linux/videodev2.h>
  
  #include "v4l2_request.h"
-@@ -42,6 +46,254 @@
++#include "convert_gl.h"
+ 
+ #define V4L2R_CONVERT_TIMEOUT_MS 2000
+ 
+@@ -42,6 +47,282 @@
  #define V4L2R_VPP_MIN_DIM 34
  #define V4L2R_VPP_MAX_DIM 8192
  
@@ -267,6 +271,34 @@ index c117126..fe73f06 100644
 +	}
 +	backing = surface->backing;
 +
++	/* The GPU first (convert_gl.c), the CPU if that isn't available. */
++	if (backing->dmabuf_fd[0] >= 0 &&
++	    v4l2r_export_capture_dmabufs(ctx, capture, capture_index) == 0) {
++		uint32_t w = width, h = height;
++		struct v4l2r_gl_plane py, puv;
++
++		if (w > backing->width)
++			w = backing->width;
++		if (w > backing->pitch)
++			w = backing->pitch & ~15u;
++		if (h > backing->height)
++			h = backing->height;
++		py = (struct v4l2r_gl_plane) { capture->dmabuf_fd[0], 0, y_stride,
++					       capture->plane_size[0] / y_stride };
++		if (capture->nb_planes > 1)
++			puv = (struct v4l2r_gl_plane) { capture->dmabuf_fd[1], 0, uv_stride,
++							capture->plane_size[1] / uv_stride };
++		else
++			puv = (struct v4l2r_gl_plane) { capture->dmabuf_fd[0], y_stride * height, uv_stride,
++							(capture->plane_size[0] - y_stride * height) / uv_stride };
++		if (v4l2r_gl_detile(&py, &puv, backing->dmabuf_fd[0], backing->pitch,
++				    backing->pitch * backing->height, w & ~15u, h)) {
++			v4l2r_trace("MM21 GPU detile (surface 0x%08x buf #%d): %.2f ms\n",
++				    surface->id, capture_index, (v4l2r_now_ns() - t0) / 1e6);
++			return;
++		}
++	}
++
 +	for (unsigned int i = 0; i < capture->nb_planes; i++) {
 +		if (capture->map[i])
 +			continue;
@@ -329,7 +361,7 @@ index c117126..fe73f06 100644
  VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
  {
  	struct v4l2r_driver *drv = ctx->drv;
-@@ -52,6 +304,11 @@ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
+@@ -52,6 +333,11 @@ VAStatus v4l2r_convert_setup(struct v4l2r_context *ctx)
  	uint32_t width = v4l2r_format_width(&ctx->capture_format);
  	uint32_t height = v4l2r_format_height(&ctx->capture_format);
  
@@ -341,7 +373,7 @@ index c117126..fe73f06 100644
  	if (!v4l2r_converter_supports(drv, src_pixelformat))
  		return VA_STATUS_ERROR_OPERATION_FAILED;
  
-@@ -167,7 +424,8 @@ void v4l2r_convert_destroy(struct v4l2r_context *ctx)
+@@ -167,7 +453,8 @@ void v4l2r_convert_destroy(struct v4l2r_context *ctx)
  
  	/* Closing the fd tears down the m2m context including any queued
  	 * jobs; importer-side dma-buf references are dropped with it. */
@@ -351,7 +383,7 @@ index c117126..fe73f06 100644
  	free(conv);
  	ctx->conv = NULL;
  }
-@@ -258,6 +516,11 @@ void v4l2r_convert_kick(struct v4l2r_context *ctx, int capture_index)
+@@ -258,6 +545,11 @@ void v4l2r_convert_kick(struct v4l2r_context *ctx, int capture_index)
  	if (!surface)
  		return;
  
@@ -363,6 +395,410 @@ index c117126..fe73f06 100644
  	convert_reap(ctx, false);
  
  	/* All slots busy: wait one out. */
+diff --git i/src/convert_gl.c w/src/convert_gl.c
+new file mode 100644
+index 0000000..d2a1fee
+--- /dev/null
++++ w/src/convert_gl.c
+@@ -0,0 +1,371 @@
++/*
++ * MM21 to NV12 on the GPU, the way ChromeOS's Chrome detiles MediaTek decoder
++ * output (MT8189 has no MDP3 path for it). The decoder's CAPTURE planes are
++ * imported as linear RGBA8 images (4 bytes per texel) and a fragment shader
++ * gathers each output texel from its tile: MM21 stores 16-byte-wide tiles,
++ * 32 rows tall for luma and 16 for the interleaved chroma, each tile one
++ * contiguous block, a row of tiles taking stride * tile_height bytes. The
++ * NV12 surface's two planes are the render targets.
++ *
++ * Only with Mesa (Panfrost): EGL is loaded privately (RTLD_LOCAL) and every
++ * entry point resolved through eglGetProcAddress, so nothing clashes with the
++ * ANGLE copy of libGLESv2 that Chrome loads in the same process.
++ * V4L2R_GL_DETILE=0 turns it off; any failure falls back to the CPU path.
++ */
++#include <dlfcn.h>
++#include <pthread.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <GLES3/gl3.h>
++#include <GLES2/gl2ext.h>
++#include <drm_fourcc.h>
++
++#include "convert_gl.h"
++#include "v4l2_request.h"
++
++#define GL_FUNCS(X) \
++	X(PFNGLCREATESHADERPROC, glCreateShader) \
++	X(PFNGLSHADERSOURCEPROC, glShaderSource) \
++	X(PFNGLCOMPILESHADERPROC, glCompileShader) \
++	X(PFNGLGETSHADERIVPROC, glGetShaderiv) \
++	X(PFNGLGETSHADERINFOLOGPROC, glGetShaderInfoLog) \
++	X(PFNGLCREATEPROGRAMPROC, glCreateProgram) \
++	X(PFNGLATTACHSHADERPROC, glAttachShader) \
++	X(PFNGLLINKPROGRAMPROC, glLinkProgram) \
++	X(PFNGLGETPROGRAMIVPROC, glGetProgramiv) \
++	X(PFNGLUSEPROGRAMPROC, glUseProgram) \
++	X(PFNGLGETUNIFORMLOCATIONPROC, glGetUniformLocation) \
++	X(PFNGLUNIFORM1IPROC, glUniform1i) \
++	X(PFNGLUNIFORM1FPROC, glUniform1f) \
++	X(PFNGLGENTEXTURESPROC, glGenTextures) \
++	X(PFNGLDELETETEXTURESPROC, glDeleteTextures) \
++	X(PFNGLBINDTEXTUREPROC, glBindTexture) \
++	X(PFNGLACTIVETEXTUREPROC, glActiveTexture) \
++	X(PFNGLTEXPARAMETERIPROC, glTexParameteri) \
++	X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers) \
++	X(PFNGLDELETEFRAMEBUFFERSPROC, glDeleteFramebuffers) \
++	X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer) \
++	X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D) \
++	X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus) \
++	X(PFNGLGENVERTEXARRAYSPROC, glGenVertexArrays) \
++	X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray) \
++	X(PFNGLVIEWPORTPROC, glViewport) \
++	X(PFNGLDRAWARRAYSPROC, glDrawArrays) \
++	X(PFNGLFINISHPROC, glFinish) \
++	X(PFNGLGETERRORPROC, glGetError) \
++	X(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
++
++#define EGL_FUNCS(X) \
++	X(PFNEGLGETPLATFORMDISPLAYEXTPROC, eglGetPlatformDisplayEXT) \
++	X(PFNEGLINITIALIZEPROC, eglInitialize) \
++	X(PFNEGLBINDAPIPROC, eglBindAPI) \
++	X(PFNEGLQUERYSTRINGPROC, eglQueryString) \
++	X(PFNEGLCREATECONTEXTPROC, eglCreateContext) \
++	X(PFNEGLMAKECURRENTPROC, eglMakeCurrent) \
++	X(PFNEGLGETCURRENTCONTEXTPROC, eglGetCurrentContext) \
++	X(PFNEGLGETCURRENTDISPLAYPROC, eglGetCurrentDisplay) \
++	X(PFNEGLGETCURRENTSURFACEPROC, eglGetCurrentSurface) \
++	X(PFNEGLCREATEIMAGEKHRPROC, eglCreateImageKHR) \
++	X(PFNEGLDESTROYIMAGEKHRPROC, eglDestroyImageKHR) \
++	X(PFNEGLGETERRORPROC, eglGetError)
++
++#define DECLARE(type, name) static type p_##name;
++GL_FUNCS(DECLARE)
++EGL_FUNCS(DECLARE)
++
++#define IMAGE_CACHE 160
++
++struct gl_image {
++	dev_t dev;
++	ino_t ino;
++	uint32_t offset, width, height, pitch;
++	EGLImageKHR image;
++	GLuint tex;
++	GLuint fbo;		/* only for render targets */
++	unsigned long used;
++};
++
++static struct {
++	pthread_mutex_t lock;
++	bool tried, ok;
++	EGLDisplay dpy;
++	EGLContext ctx;
++	GLuint prog, vao;
++	GLint u_src, u_stride, u_th_shift, u_inv_stride;
++	struct gl_image images[IMAGE_CACHE];
++	unsigned long tick;
++} gl = { .lock = PTHREAD_MUTEX_INITIALIZER };
++
++static const char *vs_src =
++	"#version 300 es\n"
++	"void main() {\n"
++	"	vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
++	"	gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
++	"}\n";
++
++/* One output texel = 4 consecutive bytes of an NV12 plane row, all within one
++ * 16-byte tile row: fetch them as one RGBA8 texel of the linear view. */
++/* One output texel = 4 consecutive bytes of an NV12 plane row, all within one
++ * 16-byte tile row: fetch them as one RGBA8 texel of the linear view. Mali has
++ * no integer divider, so tile sizes are shifts and the one division (by the
++ * row stride, to find the texel's row in the linear view) a float multiply:
++ * R < 2^17 is exact in a float and the +0.5 keeps the floor exact. */
++static const char *fs_src =
++	"#version 300 es\n"
++	"precision highp float;\n"
++	"precision highp int;\n"
++	"uniform highp sampler2D src;\n"
++	"uniform int stride;\n"
++	"uniform int th_shift;\n"
++	"uniform float inv_stride;\n"
++	"out vec4 color;\n"
++	"void main() {\n"
++	"	int fx = int(gl_FragCoord.x);\n"
++	"	int y = int(gl_FragCoord.y);\n"
++	"	int r = ((fx >> 2) << (th_shift + 4)) + ((y & ((1 << th_shift) - 1)) << 4) + ((fx & 3) << 2);\n"
++	"	int q = int((float(r) + 0.5) * inv_stride);\n"
++	"	int rem = r - q * stride;\n"
++	"	color = texelFetch(src, ivec2(rem >> 2, ((y >> th_shift) << th_shift) + q), 0);\n"
++	"}\n";
++
++static bool panfrost_present(void)
++{
++	return access("/sys/module/panfrost", F_OK) == 0;
++}
++
++static GLuint compile(GLenum type, const char *src)
++{
++	GLuint s = p_glCreateShader(type);
++	GLint ok = 0;
++
++	p_glShaderSource(s, 1, &src, NULL);
++	p_glCompileShader(s);
++	p_glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++	if (!ok) {
++		char log[512] = "";
++
++		p_glGetShaderInfoLog(s, sizeof(log), NULL, log);
++		v4l2r_log("GL detile: shader: %s\n", log);
++		return 0;
++	}
++	return s;
++}
++
++static bool gl_init(void)
++{
++	void *lib;
++	PFNEGLGETPROCADDRESSPROC gpa;
++	EGLint major, minor;
++	const char *ext;
++	static const EGLint ctx_attr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
++	GLuint vs, fs;
++	GLint linked = 0;
++
++	if (!panfrost_present())
++		return false;
++
++	lib = dlopen("libEGL.so.1", RTLD_NOW | RTLD_LOCAL);
++	if (!lib)
++		return false;
++	gpa = (PFNEGLGETPROCADDRESSPROC)dlsym(lib, "eglGetProcAddress");
++	if (!gpa)
++		return false;
++#define RESOLVE(type, name) \
++	if (!(p_##name = (type)gpa(#name))) { v4l2r_log("GL detile: no %s\n", #name); return false; }
++	EGL_FUNCS(RESOLVE)
++
++	gl.dpy = p_eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
++	if (gl.dpy == EGL_NO_DISPLAY || !p_eglInitialize(gl.dpy, &major, &minor))
++		return false;
++	ext = p_eglQueryString(gl.dpy, EGL_EXTENSIONS);
++	if (!ext || !strstr(ext, "EGL_EXT_image_dma_buf_import") ||
++	    !strstr(ext, "EGL_KHR_surfaceless_context") || !strstr(ext, "EGL_KHR_no_config_context")) {
++		v4l2r_log("GL detile: EGL lacks dma-buf import or surfaceless contexts\n");
++		return false;
++	}
++	if (!p_eglBindAPI(EGL_OPENGL_ES_API))
++		return false;
++	gl.ctx = p_eglCreateContext(gl.dpy, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, ctx_attr);
++	if (gl.ctx == EGL_NO_CONTEXT)
++		return false;
++	if (!p_eglMakeCurrent(gl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, gl.ctx))
++		return false;
++	GL_FUNCS(RESOLVE)
++#undef RESOLVE
++
++	vs = compile(GL_VERTEX_SHADER, vs_src);
++	fs = compile(GL_FRAGMENT_SHADER, fs_src);
++	if (!vs || !fs)
++		goto fail;
++	gl.prog = p_glCreateProgram();
++	p_glAttachShader(gl.prog, vs);
++	p_glAttachShader(gl.prog, fs);
++	p_glLinkProgram(gl.prog);
++	p_glGetProgramiv(gl.prog, GL_LINK_STATUS, &linked);
++	if (!linked)
++		goto fail;
++	gl.u_src = p_glGetUniformLocation(gl.prog, "src");
++	gl.u_stride = p_glGetUniformLocation(gl.prog, "stride");
++	gl.u_th_shift = p_glGetUniformLocation(gl.prog, "th_shift");
++	gl.u_inv_stride = p_glGetUniformLocation(gl.prog, "inv_stride");
++	p_glGenVertexArrays(1, &gl.vao);
++	p_eglMakeCurrent(gl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++	v4l2r_log("detiling MM21 on the GPU (EGL %d.%d)\n", major, minor);
++	return true;
++fail:
++	p_eglMakeCurrent(gl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++	return false;
++}
++
++/* An imported RGBA8 view of (fd, offset): width texels, height rows, pitch
++ * bytes. Cached by the dma-buf's inode, which stays unique while it lives. */
++static struct gl_image *get_image(int fd, uint32_t offset, uint32_t width,
++				  uint32_t height, uint32_t pitch, bool target)
++{
++	struct stat st;
++	struct gl_image *im, *victim = &gl.images[0];
++	EGLint attr[] = {
++		EGL_WIDTH, (EGLint)width,
++		EGL_HEIGHT, (EGLint)height,
++		EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ABGR8888,
++		EGL_DMA_BUF_PLANE0_FD_EXT, fd,
++		EGL_DMA_BUF_PLANE0_OFFSET_EXT, (EGLint)offset,
++		EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)pitch,
++		EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (EGLint)(DRM_FORMAT_MOD_LINEAR & 0xffffffff),
++		EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (EGLint)(DRM_FORMAT_MOD_LINEAR >> 32),
++		EGL_NONE
++	};
++
++	if (fstat(fd, &st))
++		return NULL;
++	for (int i = 0; i < IMAGE_CACHE; i++) {
++		im = &gl.images[i];
++		if (im->image && im->dev == st.st_dev && im->ino == st.st_ino &&
++		    im->offset == offset && im->width == width && im->height == height &&
++		    im->pitch == pitch && (!target || im->fbo)) {
++			im->used = ++gl.tick;
++			return im;
++		}
++		if (!im->image || im->used < victim->used)
++			victim = im;
++	}
++
++	im = victim;
++	v4l2r_trace("GL detile: import %ux%u pitch %u%s\n", width, height, pitch, target ? " (target)" : "");
++	if (im->image) {
++		if (im->fbo)
++			p_glDeleteFramebuffers(1, &im->fbo);
++		p_glDeleteTextures(1, &im->tex);
++		p_eglDestroyImageKHR(gl.dpy, im->image);
++		memset(im, 0, sizeof(*im));
++	}
++	im->image = p_eglCreateImageKHR(gl.dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attr);
++	if (im->image == EGL_NO_IMAGE_KHR) {
++		v4l2r_log("GL detile: dma-buf import failed (0x%x)\n", p_eglGetError());
++		im->image = NULL;
++		return NULL;
++	}
++	p_glGenTextures(1, &im->tex);
++	p_glBindTexture(GL_TEXTURE_2D, im->tex);
++	p_glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, (GLeglImageOES)im->image);
++	p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++	p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++	if (target) {
++		p_glGenFramebuffers(1, &im->fbo);
++		p_glBindFramebuffer(GL_FRAMEBUFFER, im->fbo);
++		p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->tex, 0);
++		if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++			v4l2r_log("GL detile: NV12 plane not renderable\n");
++			p_glDeleteFramebuffers(1, &im->fbo);
++			p_glDeleteTextures(1, &im->tex);
++			p_eglDestroyImageKHR(gl.dpy, im->image);
++			memset(im, 0, sizeof(*im));
++			return NULL;
++		}
++	}
++	im->dev = st.st_dev;
++	im->ino = st.st_ino;
++	im->offset = offset;
++	im->width = width;
++	im->height = height;
++	im->pitch = pitch;
++	im->used = ++gl.tick;
++	return im;
++}
++
++static bool detile_plane(const struct v4l2r_gl_plane *src, int dst_fd, uint32_t dst_offset,
++			 uint32_t dst_pitch, uint32_t width, uint32_t height, int tile_h)
++{
++	struct gl_image *in, *out;
++
++	in = get_image(src->fd, src->offset, src->stride / 4, src->rows, src->stride, false);
++	out = get_image(dst_fd, dst_offset, width / 4, height, dst_pitch, true);
++	if (!in || !out)
++		return false;
++
++	p_glBindFramebuffer(GL_FRAMEBUFFER, out->fbo);
++	p_glViewport(0, 0, width / 4, height);
++	p_glActiveTexture(GL_TEXTURE0);
++	p_glBindTexture(GL_TEXTURE_2D, in->tex);
++	p_glUniform1i(gl.u_src, 0);
++	p_glUniform1i(gl.u_stride, src->stride);
++	p_glUniform1i(gl.u_th_shift, tile_h == 32 ? 5 : 4);
++	p_glUniform1f(gl.u_inv_stride, 1.0f / (float)src->stride);
++	p_glDrawArrays(GL_TRIANGLES, 0, 3);
++	return true;
++}
++
++bool v4l2r_gl_detile(const struct v4l2r_gl_plane *y, const struct v4l2r_gl_plane *uv,
++		     int dst_fd, uint32_t dst_pitch, uint32_t dst_uv_offset,
++		     uint32_t width, uint32_t height)
++{
++	EGLDisplay prev_dpy;
++	EGLContext prev_ctx;
++	EGLSurface prev_draw, prev_read;
++	bool ok = false;
++
++	if (width % 16 || !width || !height)
++		return false;
++
++	pthread_mutex_lock(&gl.lock);
++	if (!gl.tried) {
++		const char *env = getenv("V4L2R_GL_DETILE");
++
++		gl.tried = true;
++		gl.ok = !(env && env[0] == '0') && gl_init();
++	}
++	if (!gl.ok)
++		goto out;
++
++	prev_dpy = p_eglGetCurrentDisplay();
++	prev_ctx = p_eglGetCurrentContext();
++	prev_draw = p_eglGetCurrentSurface(EGL_DRAW);
++	prev_read = p_eglGetCurrentSurface(EGL_READ);
++	if (!p_eglMakeCurrent(gl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, gl.ctx))
++		goto out;
++
++	p_glUseProgram(gl.prog);
++	p_glBindVertexArray(gl.vao);
++	ok = detile_plane(y, dst_fd, 0, dst_pitch, width, height, 32) &&
++	     detile_plane(uv, dst_fd, dst_uv_offset, dst_pitch, width, height / 2, 16);
++	/* The surface goes to the consumer right after this returns. */
++	p_glFinish();
++	if (p_glGetError() != GL_NO_ERROR)
++		ok = false;
++
++	if (prev_ctx != EGL_NO_CONTEXT)
++		p_eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
++	else
++		p_eglMakeCurrent(gl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++out:
++	pthread_mutex_unlock(&gl.lock);
++	return ok;
++}
+diff --git i/src/convert_gl.h w/src/convert_gl.h
+new file mode 100644
+index 0000000..d275c03
+--- /dev/null
++++ w/src/convert_gl.h
+@@ -0,0 +1,21 @@
++#ifndef CONVERT_GL_H
++#define CONVERT_GL_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++/* One MM21 plane as a dma-buf: rows of stride bytes starting at offset. */
++struct v4l2r_gl_plane {
++	int fd;
++	uint32_t offset;
++	uint32_t stride;
++	uint32_t rows;
++};
++
++/* Detile MM21 luma + chroma into an NV12 dma-buf on the GPU; false if the GPU
++ * path is unavailable or failed (the caller then detiles on the CPU). */
++bool v4l2r_gl_detile(const struct v4l2r_gl_plane *y, const struct v4l2r_gl_plane *uv,
++		     int dst_fd, uint32_t dst_pitch, uint32_t dst_uv_offset,
++		     uint32_t width, uint32_t height);
++
++#endif
 diff --git i/src/decode.c w/src/decode.c
 index 777750b..e2b024b 100644
 --- i/src/decode.c
@@ -447,6 +883,18 @@ index 1f93497..7a1b714 100644
  	return true;
  }
  
+diff --git i/src/meson.build w/src/meson.build
+index 6034a33..c132c3d 100644
+--- i/src/meson.build
++++ w/src/meson.build
+@@ -3,6 +3,7 @@ sources = [
+   'handles.c',
+   'context.c',
+   'convert.c',
++  'convert_gl.c',
+   'decode.c',
+   'surface.c',
+   'buffer.c',
 diff --git i/src/surface.c w/src/surface.c
 index da433b2..38c57df 100644
 --- i/src/surface.c
