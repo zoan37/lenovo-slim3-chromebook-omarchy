@@ -1,0 +1,44 @@
+From df3a70f6eb26c320e0784fd176cabc41485fcddb Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 13:50:38 -0400
+Subject: [PATCH] drm/mediatek: mtk_crtc: route lookup uses the CRTC's own
+ mmsys private data (all_drm_private is per mmsys, not per CRTC; a second CRTC
+ with connector routes oopsed on hotplug)
+
+---
+ drivers/gpu/drm/mediatek/mtk_crtc.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.c b/drivers/gpu/drm/mediatek/mtk_crtc.c
+index 4ae389bfd..cef37c184 100644
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.c
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.c
+@@ -59,6 +59,8 @@ struct mtk_crtc {
+ #endif
+ 
+ 	struct device			*mmsys_dev;
++	/* the mmsys this CRTC's path belongs to (all_drm_private is per mmsys, not per CRTC) */
++	struct mtk_drm_private		*priv;
+ 	struct device			*dma_dev;
+ 	struct mtk_mutex		*mutex;
+ 	unsigned int			ddp_comp_nr;
+@@ -698,7 +700,7 @@ static void mtk_crtc_update_output(struct drm_crtc *crtc,
+ 	if (!mtk_crtc->num_conn_routes)
+ 		return;
+ 
+-	priv = ((struct mtk_drm_private *)crtc->dev->dev_private)->all_drm_private[crtc_index];
++	priv = mtk_crtc->priv;
+ 	dev = priv->dev;
+ 
+ 	dev_dbg(dev, "connector change:%d, encoder mask:0x%x for crtc:%d\n",
+@@ -1074,6 +1076,7 @@ int mtk_crtc_create(struct drm_device *drm_dev, const unsigned int *path,
+ 	if (!mtk_crtc)
+ 		return -ENOMEM;
+ 
++	mtk_crtc->priv = priv;
+ 	mtk_crtc->ddp_comp_nr = path_len;
+ 	mtk_crtc->mmsys_dev = priv->mmsys_dev;
+ 
+-- 
+2.43.0
+
