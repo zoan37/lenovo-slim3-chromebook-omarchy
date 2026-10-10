@@ -35,8 +35,23 @@ else
   futility vbutil_kernel --repack $out --oldblob "$blob" --keyblock $K/kernel.keyblock \
     --signprivate $K/kernel_data_key.vbprivk --config "$cfg"
 fi
-size=$(stat -c %s $out); (( size <= 32 * 1024 * 1024 )) || { echo "test kernel is $size bytes, KERN-B holds 32 MiB"; exit 1; }
 futility vbutil_kernel --verify $out >/dev/null
+size=$(stat -c %s $out)
+if [[ $(quigon-kernel fallback-mode 2>/dev/null) == none ]]; then
+  # No automatic fallback: KERN-B holds the default mainline kernel, marked good. The test kernel goes to KERN-C,
+  # tried once above KERN-B; the boot after is the default again. KERN-C's ChromeOS kernel is kept in a file.
+  (( size <= 64 * 1024 * 1024 )) || { echo "test kernel is $size bytes, KERN-C holds 64 MiB"; exit 1; }
+  [[ -f $B/kern-c-chromeos.bin ]] || dd if=/dev/sda6 of=$B/kern-c-chromeos.bin bs=1M status=none
+  dd if=$out of=/dev/sda6 bs=1M conv=fsync status=none
+  p=$(( $(printf '%s\n' "$(cgpt show -i 2 -P /dev/sda)" "$(cgpt show -i 4 -P /dev/sda)" | sort -n | tail -1) + 1 ))
+  cgpt add -i 6 -P "$p" -T 1 -S 0 /dev/sda
+  mkdir -p /var/lib/quigon/kernel
+  echo "test $(grep -o 'quigon\.test=[^ ]*' "$cfg" | cut -d= -f2 || true)" > /var/lib/quigon/kernel/kern-c
+  echo "armed in KERN-C: next boot runs the test kernel once ($(numfmt --to=iec $size)); the one after is the default (KERN-B)"
+  rm -f /var/lib/quigon/gpu-pending
+  status; exit 0
+fi
+(( size <= 32 * 1024 * 1024 )) || { echo "test kernel is $size bytes, KERN-B holds 32 MiB"; exit 1; }
 dd if=$out of=/dev/sda4 bs=1M conv=fsync status=none
 # one above every other kernel slot (quigon-boot-good keeps raising KERN-C), so the firmware tries this one next
 p=$(( $(printf '%s\n' "$(cgpt show -i 2 -P /dev/sda)" "$(cgpt show -i 6 -P /dev/sda)" | sort -n | tail -1) + 1 ))

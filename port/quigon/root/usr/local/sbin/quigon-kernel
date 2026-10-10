@@ -11,6 +11,13 @@
 #   quigon-kernel status
 #   quigon-kernel restore [previous]   write the default (or the previous) back into KERN-B
 #   quigon-kernel off                  boot KERN-C by default again (KERN-B priority 0; `restore` undoes it)
+#   quigon-kernel fallback-mode [none|chromeos]   show or set what happens when the mainline kernel can't boot:
+#     none (default since 2026-10-10): KERN-B is marked successful after its first good boot, so the firmware always
+#       boots it and never anything else on its own; KERN-C (Omarchy's ChromeOS kernel) has priority 0 and is never
+#       booted automatically (still on disk; the original is also in /root/kern-backup/kern-c-chromeos.bin), and test
+#       kernels (quigon-test-kernel) go to KERN-C. A new default that fails its two tries falls through to ChromeOS
+#       itself (KERN-A), which is hard to miss.
+#     chromeos: the automatic fallback described above (two failed boots -> KERN-C, the previous default restored).
 #   quigon-kernel boot-ok | fallback   called by boot-good
 # The cmdline gets root=PARTUUID=%U/PARTNROFF=3 (the firmware fills in KERN-B's GUID; KERN-B + 3 = ROOT-C, sda7),
 # so a USB stick that probes first can't take sda, and quigon.default=<tag> (boot-good keys off it).
@@ -24,8 +31,18 @@ mkdir -p $S
 cgpt() { quigon-cgpt "$@"; }
 log() { echo "quigon-kernel: $*"; logger -t quigon-kernel -- "$*" 2>/dev/null || true; }
 prio() { cgpt show -i "$1" -P $D; }
+# why this boot isn't the default mainline kernel, for quigon-kernel-notify at login: <urgency>|<title>|<body>
+notice() { mkdir -p /run/quigon; printf '%s|%s|%s\n' "$1" "$2" "$3" > /run/quigon/kernel-notice; }
+M=/etc/quigon/kernel-fallback
+mode() { local m; m=$(cat $M 2>/dev/null || true); [[ $m == none ]] && echo none || echo chromeos; }
+# KERN-C, Omarchy on the ChromeOS kernel: bootable (successful, just above ChromeOS's KERN-A) or never booted on its own
+kern_c() {
+  if [[ $1 == on ]]; then local p=$(( $(prio 2) + 1 )); (( $(prio 6) > p )) && p=$(prio 6); cgpt add -i 6 -P "$p" -T 0 -S 1 $D
+  else cgpt add -i 6 -P 0 $D; fi
+}
 status() {
   for i in 2 4 6; do echo "$(cgpt show -i $i -l $D): prio=$(prio $i) tries=$(cgpt show -i $i -T $D) ok=$(cgpt show -i $i -S $D)"; done
+  echo "fallback: $(mode)"
   echo "KERN-B holds: $(cat $S/kern-b 2>/dev/null || echo unknown)"
   for w in default previous; do
     if [[ -f $S/$w.tag ]]; then echo "$w: $(cat $S/$w.tag) ($(cat $S/$w.release 2>/dev/null || echo '?'))"; fi
@@ -45,14 +62,17 @@ write() {
   [[ -f /root/kern-backup/kern-b-chromeos.bin ]] || { install -d -m700 /root/kern-backup; dd if=${D}4 of=/root/kern-backup/kern-b-chromeos.bin bs=1M status=none; }
   dd if=$out of=${D}4 bs=1M conv=fsync status=none
   rm -f $out
-  arm
+  arm try
   echo "$w $(cat $S/$w.tag)" > $S/kern-b
-  log "KERN-B: $w kernel $(cat $S/$w.tag) armed (2 tries per boot, KERN-C as the fallback)"
+  log "KERN-B: $w kernel $(cat $S/$w.tag) armed (2 tries; then $([[ $(mode) == none ]] && echo "ChromeOS, KERN-A" || echo "the KERN-C fallback"))"
 }
-# above KERN-A and KERN-C, 2 tries
+# arm try: above KERN-A and KERN-C with 2 tries (a kernel that hasn't booted yet, or always in chromeos mode);
+# arm good: successful, no tries needed (none mode, after a good boot): the firmware boots it every time
 arm() {
   local p; p=$(( $(printf '%s\n' "$(prio 2)" "$(prio 6)" | sort -n | tail -1) + 1 ))
-  cgpt add -i 4 -P "$p" -T 2 -S 0 $D
+  if [[ $1 == good && $(mode) == none ]]; then cgpt add -i 4 -P "$p" -T 0 -S 1 $D; else cgpt add -i 4 -P "$p" -T 2 -S 0 $D; fi
+  [[ $(mode) == none ]] && kern_c off
+  return 0
 }
 
 # keep the modules of the running kernel, the default and the previous; drop other default-build releases
@@ -85,11 +105,33 @@ case ${1:-} in
     status ;;
   status) status ;;
   restore) write "${2:-default}"; status ;;
-  off) cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b; log "mainline default off: KERN-C boots"; status ;;
+  off) cgpt add -i 4 -P 0 -T 0 -S 0 $D; kern_c on; echo off > $S/kern-b; log "mainline default off: KERN-C boots"; status ;;
+  fallback-mode)
+    case ${2:-} in
+      "") mode ;;
+      none)
+        mkdir -p /etc/quigon; echo none > $M
+        kern_c off
+        # a default that has already booted fine counts as good now
+        held=$(cat $S/kern-b 2>/dev/null || true)
+        if [[ ${held%% *} == default || ${held%% *} == previous ]] && grep -q "quigon\.default=" /proc/cmdline; then arm good; fi
+        log "fallback: none (KERN-B always boots; KERN-C only by hand)"; status ;;
+      chromeos)
+        mkdir -p /etc/quigon; echo chromeos > $M
+        held_c=$(cat $S/kern-c 2>/dev/null || true)
+        if [[ ${held_c%% *} == test ]]; then
+          [[ -f /root/kern-backup/kern-c-chromeos.bin ]] || { echo "KERN-C holds a test kernel and there is no kern-c-chromeos.bin to restore"; exit 1; }
+          dd if=/root/kern-backup/kern-c-chromeos.bin of=${D}6 bs=1M conv=fsync status=none; echo chromeos > $S/kern-c
+        fi
+        kern_c on
+        [[ $(prio 4) -gt 0 ]] && arm try
+        log "fallback: chromeos (two failed boots of KERN-B -> KERN-C)"; status ;;
+      *) echo "fallback-mode [none|chromeos]"; exit 2 ;;
+    esac ;;
   boot-ok)
     # booted the KERN-B kernel to multi-user: give the tries back, keep it above KERN-A/C
     tag=$(grep -o "quigon\.default=[^ ]*" /proc/cmdline | cut -d= -f2)
-    arm
+    arm good
     held=$(cat $S/kern-b 2>/dev/null || true)
     if [[ ${held#* } == "$tag" && ${held%% *} == previous ]]; then
       # the rollback came up: it is the default again, the failed kernel stays around as the previous
@@ -99,25 +141,43 @@ case ${1:-} in
         [[ -f $S/failed.$e ]] && mv -f $S/failed.$e $S/previous.$e
       done
       echo "default $tag" > $S/kern-b
+      notice critical "Running the previous kernel ($tag)" "The newer default kernel ($(cat $S/previous.tag 2>/dev/null)) failed to boot twice, so the Chromebook rolled back to $tag, which is now the default. 'quigon-kernel status' shows the details."
     fi
-    log "booted mainline $tag from KERN-B; 2 tries armed for the next boot" ;;
+    log "booted mainline $tag from KERN-B; $([[ $(mode) == none ]] && echo "marked good" || echo "2 tries armed for the next boot")" ;;
   fallback)
     # booted KERN-C. After a test kernel, or when the default ran out of tries, put a kernel that booted before back.
+    if [[ $(mode) == none ]]; then
+      notice critical "Running the ChromeOS kernel" "KERN-C was booted although the automatic fallback is off; the mainline kernel in KERN-B boots by default. 'quigon-kernel status' shows the boot slots."
+      exit 0
+    fi
     held=$(cat $S/kern-b 2>/dev/null || echo none)
     tries=$(cgpt show -i 4 -T $D)
+    t="Running the ChromeOS kernel (fallback)"
     case ${held%% *} in
       test)
+        notice normal "$t" "This boot followed a one-time test kernel (${held#* }). The default mainline kernel boots again next time."
         if [[ -f $S/default.fit ]]; then log "after test kernel ${held#* }: default back in KERN-B"; write default; fi ;;
       default)
         if (( tries == 0 )); then
           log "mainline ${held#* } did not come up twice: on the ChromeOS kernel"
-          if [[ -f $S/previous.fit ]]; then write previous; else cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b; fi
+          if [[ -f $S/previous.fit ]]; then
+            write previous
+            notice critical "$t" "The default mainline kernel (${held#* }) failed to boot twice. The previous one ($(cat $S/previous.tag)) boots next time. 'quigon-kernel status' shows the details."
+          else
+            cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b
+            notice critical "$t" "The mainline kernel (${held#* }) failed to boot twice and there is no older one, so the ChromeOS kernel stays the default. 'quigon-kernel restore' tries it again."
+          fi
+        else
+          notice critical "$t" "The default mainline kernel (${held#* }) didn't start, though it still has tries left. 'quigon-kernel status' shows the details."
         fi ;;
       previous)
         if (( tries == 0 )); then
           log "the previous kernel ${held#* } did not come up either: KERN-C is the default"
           cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b
+          notice critical "$t" "Neither mainline kernel booted, so the ChromeOS kernel is the default now. 'quigon-kernel restore' tries the mainline kernel again."
         fi ;;
+      off) notice normal "$t" "The mainline kernel is switched off ('quigon-kernel off'). 'quigon-kernel restore' makes it the default again." ;;
+      *) notice normal "$t" "No default mainline kernel is set up (quigon-kernel install)." ;;
     esac ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

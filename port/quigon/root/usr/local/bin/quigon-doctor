@@ -54,7 +54,11 @@ check_system() {
   [[ -d /usr/lib/modules/$kver ]] && pass "modules for running kernel $kver present" || fail "no /usr/lib/modules/$kver (ChromeOS modules missing)"
   if [[ $(findmnt -no SOURCE /) == /dev/sda7 ]]; then
     local a; a=$(quigon-cgpt show -i 6 -A /dev/sda 2>/dev/null)
-    [[ -n $a ]] && [[ $(quigon-cgpt show -i 6 -S /dev/sda) == 1 ]] && pass "KERN-C marked successful (priority $(quigon-cgpt show -i 6 -P /dev/sda))" || fail "KERN-C not marked successful"
+    if [[ $(quigon-kernel fallback-mode 2>/dev/null) == none ]]; then
+      : # KERN-C is out of the boot order (fallback off): checked under "Mainline kernel"
+    else
+      [[ -n $a ]] && [[ $(quigon-cgpt show -i 6 -S /dev/sda) == 1 ]] && pass "KERN-C marked successful (priority $(quigon-cgpt show -i 6 -P /dev/sda))" || fail "KERN-C not marked successful"
+    fi
   else
     pass "running from $(findmnt -no SOURCE /) (not the internal disk)"
   fi
@@ -73,7 +77,12 @@ check_system() {
     elif grep -q "quigon.test=" /proc/cmdline; then
       echo "  · test kernel ($(grep -o "quigon\.test=[^ ]*" /proc/cmdline | cut -d= -f2)); the default comes back after the next boot"
     fi
-    [[ $(quigon-cgpt show -i 4 -T /dev/sda 2>/dev/null) -gt 0 || $held == test* ]] && pass "KERN-B armed ($held)" || fail "KERN-B has no tries left: the next boot is the ChromeOS kernel (quigon-kernel status / restore)"
+    if [[ $(quigon-kernel fallback-mode 2>/dev/null) == none ]]; then
+      [[ $(quigon-cgpt show -i 4 -S /dev/sda 2>/dev/null) == 1 || $held == test* ]] && pass "KERN-B marked good ($held); no automatic fallback" || fail "KERN-B isn't marked good yet (quigon-kernel status)"
+      [[ $(quigon-cgpt show -i 6 -P /dev/sda 2>/dev/null) == 0 || $(cat /var/lib/quigon/kernel/kern-c 2>/dev/null) == test* ]] && pass "KERN-C (ChromeOS kernel) out of the boot order" || fail "KERN-C would boot on its own although the fallback is off (quigon-kernel fallback-mode none)"
+    else
+      [[ $(quigon-cgpt show -i 4 -T /dev/sda 2>/dev/null) -gt 0 || $held == test* ]] && pass "KERN-B armed ($held), ChromeOS-kernel fallback on" || fail "KERN-B has no tries left: the next boot is the ChromeOS kernel (quigon-kernel status / restore)"
+    fi
     local l1=/sys/bus/pci/devices/0000:01:00.0/link
     if [[ -r $l1/l1_2_aspm ]]; then
       if [[ $(cat $l1/l1_2_aspm) == 0 ]]; then
@@ -196,6 +205,7 @@ check_session() {
   done
   grep -q "quigon: Chromebook top row" "$home/.config/hypr/bindings.lua" 2>/dev/null && pass "top-row key binds in bindings.lua" || fail "top-row key binds missing (omarchy refresh hyprland?) — see port/quigon/user/hypr-bindings-quigon.lua"
   grep -q "quigon-gpu-notify" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "GPU fallback notification in autostart.lua" || fail "quigon-gpu-notify missing from autostart.lua"
+  grep -q "quigon-kernel-notify" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "kernel fallback notification in autostart.lua" || fail "quigon-kernel-notify missing from autostart.lua (port/quigon/user/hypr-autostart-quigon.lua)"
   grep -q "hyprpm reload" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "hyprpm reload in autostart.lua" || fail "hyprpm reload missing from autostart.lua"
   grep -q "quigon-lid-watch" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "lid watcher in autostart.lua" || fail "quigon-lid-watch missing from autostart.lua: a lid close won't lock (port/quigon/user/hypr-autostart-quigon.lua)"
   if [[ $(uname -r) == *-quigon* ]]; then

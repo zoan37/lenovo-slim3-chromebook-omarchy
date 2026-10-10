@@ -11,14 +11,16 @@ the internal drive. Experimental device port, not an installer.
 ## Two kernels, one Omarchy
 
 **I use the mainline (custom) kernel day to day**: it's this Chromebook's default boot, and the "Mainline kernel"
-column below is what that daily setup does. The ChromeOS kernel stays installed only as the automatic fallback.
+column below is what that daily setup does. The ChromeOS-kernel setup is still on the disk but no longer boots on
+its own: there's no automatic fallback (since 2026-10-10), so the Chromebook never ends up on a different kernel
+without me knowing. `quigon-kernel fallback-mode chromeos` turns the old fallback back on.
 
 The same Omarchy install (ROOT-C on the internal drive) runs on either of two kernels:
 
-| | **Mainline kernel** (default since 2026-10-10) | **ChromeOS kernel** (the first approach, now the fallback) |
+| | **Mainline kernel** (default since 2026-10-10) | **ChromeOS kernel** (the first approach, now inactive) |
 |---|---|---|
 | What it is | linux-next + the MT8189 series posted upstream + this repo's patches ([`port/quigon/patches/mainline-*`](port/quigon/patches)), board DTS in [`port/quigon/mainline/`](port/quigon/mainline) | ChromeOS's own `chromeos-6.6` kernel from the device, re-signed with the devkeys |
-| Boots from | KERN-B; two failed boots in a row and the firmware falls back to KERN-C | KERN-C |
+| Boots from | KERN-B, marked good: the firmware always boots it | KERN-C, out of the boot order (backup in `/root/kern-backup`); boots only if switched back on |
 | GPU | **Stock Mesa on Panfrost** (Mali-G57), no wrappers | ChromeOS's closed `libmali`, bridged to desktop Linux with an EGL shim, minigbm, Zink and per-app wrappers |
 | Suspend | Real s2idle through the SPM (~0.1 W asleep); lid/keyboard/RTC wake | s2idle |
 | External displays | HDMI (up to 4K30, hotplug) and USB-C DisplayPort (2560×1080@60 / 4K30, 65 W PD charging), both with audio | not set up |
@@ -57,11 +59,14 @@ Day-to-day health check: `quigon-doctor`.
 
 ## Kernel tools
 
-- `quigon-kernel status | install | restore [previous] | off` (on the Chromebook): the default mainline kernel in
-  KERN-B, the previous one kept as the rollback.
+- `quigon-kernel status | install | restore [previous] | off | fallback-mode [none|chromeos]` (on the Chromebook):
+  the default mainline kernel in KERN-B, the previous one kept for `restore previous`. Fallback mode `none` (the
+  default): KERN-B always boots, KERN-C (the ChromeOS kernel) never on its own, test kernels go to KERN-C;
+  `chromeos`: two failed boots fall back to Omarchy on the ChromeOS kernel.
 - [`scripts/mainline-default.sh <tag>`](scripts/mainline-default.sh): build the kernel tree on a build host, install
   it as the default (own module directory per default kernel).
-- [`scripts/mainline-full.sh <tag>`](scripts/mainline-full.sh): boot a test kernel once; the default comes back after.
+- [`scripts/mainline-full.sh <tag>`](scripts/mainline-full.sh): boot a test kernel once (from KERN-C); the default
+  comes back after.
 - [`scripts/sleepstress.sh`](scripts/sleepstress.sh), [`scripts/test-video-decode.sh`](scripts/test-video-decode.sh):
   regression tests. [`scripts/suzyq.sh`](scripts/suzyq.sh): debug consoles and remote reset.
 
