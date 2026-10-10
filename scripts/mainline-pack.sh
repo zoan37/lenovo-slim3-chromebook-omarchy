@@ -5,6 +5,7 @@
 #   to the Chromebook and arm it in the boot-once slot (quigon-test-kernel). The next reboot runs it once.
 #   DTB=<name> picks another DTB from the build (default mt8189-quigon). The kernel's built-in initramfs does the test; afterwards `mainline-log` (scripts/mainline-log.sh) on the
 #   Chromebook shows its console from pstore. FULL=1 boots the Omarchy install (ROOT-C) on the mainline kernel instead.
+#   NOARM=1 only copies the FIT and cmdline to /root/kern-backup/<tag>.{fit,cmdline}.
 #   BRINGUP=<flags> sets the bring-up flags that keep unused clocks/power domains/regulators on. Default: none for
 #   FULL=1 (the full DTS describes every user; mt8189-quigon.dts keeps the unclaimed PMIC rails on), all three for the
 #   test initramfs, whose partial DTBs leave hardware without a driver.
@@ -61,4 +62,6 @@ else
 fi
 ls -la "$w/image.fit" | awk '{print "FIT", $5, "bytes"}'
 scp -q "$w/image.fit" "$w/cmdline" "$host:/root/kern-backup/"
-ssh "$host" "mv /root/kern-backup/image.fit /root/kern-backup/$tag.fit && mv /root/kern-backup/cmdline /root/kern-backup/$tag.cmdline && quigon-test-kernel --vmlinuz /root/kern-backup/$tag.fit /root/kern-backup/$tag.cmdline"
+ssh "$host" "mv /root/kern-backup/image.fit /root/kern-backup/$tag.fit && mv /root/kern-backup/cmdline /root/kern-backup/$tag.cmdline"
+# NOARM=1: leave it in /root/kern-backup (mainline-default.sh makes it the default kernel instead)
+[[ -n ${NOARM:-} ]] || ssh "$host" "quigon-test-kernel --vmlinuz /root/kern-backup/$tag.fit /root/kern-backup/$tag.cmdline"

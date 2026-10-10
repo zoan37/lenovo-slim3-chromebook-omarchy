@@ -1,0 +1,53 @@
+From 0f7a7a6e0066595a6e7d29de4ef9043b80912218 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 14:18:21 -0400
+Subject: [PATCH] ASoC: mediatek: mt8189: run PCM_0_BE (HDMI bridge) at S24_LE
+
+DPCM passes the FE format to the BE unchanged, so PipeWire.s S32 reached the IT61620 (which takes 16/20/24-bit)
+and every start failed. The PCM 0 frame only lines up with the bridge in 24-bit mode; a BE fixup pins it, the AFE
+converts whatever the FE plays.
+---
+ sound/soc/mediatek/mt8189/mt8189-nau8825.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/mediatek/mt8189/mt8189-nau8825.c b/sound/soc/mediatek/mt8189/mt8189-nau8825.c
+index d98537fd2..123d7eac2 100644
+--- a/sound/soc/mediatek/mt8189/mt8189-nau8825.c
++++ b/sound/soc/mediatek/mt8189/mt8189-nau8825.c
+@@ -181,6 +181,21 @@ static int mt8189_dptx_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+ 	return 0;
+ }
+ 
++/*
++ * quigon: the PCM 0 interface sends the same frame whatever the format, and an HDMI bridge on it (IT61620) only
++ * lines up with 24-bit samples. Run the BE at S24_LE whatever the FE format is; the AFE converts.
++ */
++static int mt8189_hdmi_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
++				       struct snd_pcm_hw_params *params)
++{
++	snd_mask_reset_range(hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT),
++			     0, SNDRV_PCM_FORMAT_LAST);
++
++	params_set_format(params, SNDRV_PCM_FORMAT_S24_LE);
++
++	return 0;
++}
++
+ static const struct snd_soc_ops mt8189_pcm_ops = {
+ 	.startup = mt8189_common_i2s_startup,
+ };
+@@ -1038,8 +1053,10 @@ static int mt8189_nau8825_soc_card_probe(struct mtk_soc_card_data *soc_card_data
+ 				dai_link->init = mt8189_dptx_codec_init;
+ 		} else if (strcmp(dai_link->name, "PCM_0_BE") == 0) {
+ 			if (dai_link->num_codecs &&
+-			    strcmp(dai_link->codecs->dai_name, "snd-soc-dummy-dai"))
++			    strcmp(dai_link->codecs->dai_name, "snd-soc-dummy-dai")) {
+ 				dai_link->init = mt8189_hdmi_codec_init;
++				dai_link->be_hw_params_fixup = mt8189_hdmi_hw_params_fixup;
++			}
+ 		} else if (strcmp(dai_link->name, "I2SOUT0_BE") == 0 ||
+ 			   strcmp(dai_link->name, "I2SIN0_BE") == 0) {
+ 			if (!strcmp(dai_link->codecs->dai_name, NAU8825_CODEC_DAI)) {
+-- 
+2.43.0
+

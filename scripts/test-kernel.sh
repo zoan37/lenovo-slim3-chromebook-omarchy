@@ -2,7 +2,8 @@
 # test-kernel.sh <kernel-partition-image> [cmdline-file]
 #   Boot-once test slot: signs a kernel blob with the devkeys, writes it to KERN-B (ChromeOS's spare A/B slot; the
 #   original is backed up in /root/kern-backup/kern-b-chromeos.bin) and marks it highest priority (above KERN-A/C), tries 1, not successful.
-#   The next boot uses it exactly once; nothing marks it good, so the boot after falls back to KERN-C (Omarchy).
+#   The next boot uses it exactly once; nothing marks it good, so the boot after falls back to KERN-C (Omarchy), where
+#   boot-good puts the default mainline kernel (quigon-kernel), if there is one, back into KERN-B.
 #   A test kernel that hangs before its watchdog/panic=N kicks in needs a long press of the power button, then
 #   Omarchy comes back. Logs of a crashed test boot: /sys/fs/pstore after the warm reboot (ramoops at 0xffec5000,
 #   1 MiB, set up by the firmware for any kernel).
@@ -18,7 +19,8 @@ status() { for i in 2 4 6; do echo "$(cgpt show -i $i -l /dev/sda): prio=$(cgpt 
 case ${1:-} in
   --status) status; grep -o "quigon.test=[^ ]*" /proc/cmdline || echo "running: normal kernel"; exit 0 ;;
   --disarm) cgpt add -i 4 -P 0 -T 0 -S 0 /dev/sda; status; exit 0 ;;
-  --restore-chromeos) dd if=$B/kern-b-chromeos.bin of=/dev/sda4 bs=1M conv=fsync status=none; cgpt add -i 4 -P 1 -T 0 -S 1 /dev/sda; status; exit 0 ;;
+  --restore-chromeos) dd if=$B/kern-b-chromeos.bin of=/dev/sda4 bs=1M conv=fsync status=none; cgpt add -i 4 -P 1 -T 0 -S 1 /dev/sda
+    mkdir -p /var/lib/quigon/kernel; echo off > /var/lib/quigon/kernel/kern-b; status; exit 0 ;;
 esac
 install -d -m700 $B
 [[ -f $B/kern-b-chromeos.bin ]] || dd if=/dev/sda4 of=$B/kern-b-chromeos.bin bs=1M status=none
@@ -39,6 +41,9 @@ dd if=$out of=/dev/sda4 bs=1M conv=fsync status=none
 # one above every other kernel slot (quigon-boot-good keeps raising KERN-C), so the firmware tries this one next
 p=$(( $(printf '%s\n' "$(cgpt show -i 2 -P /dev/sda)" "$(cgpt show -i 6 -P /dev/sda)" | sort -n | tail -1) + 1 ))
 cgpt add -i 4 -P "$p" -T 1 -S 0 /dev/sda
+# KERN-B no longer holds the default mainline kernel: quigon-kernel fallback writes it back after this boot
+mkdir -p /var/lib/quigon/kernel
+echo "test $(grep -o 'quigon\.test=[^ ]*' "$cfg" | cut -d= -f2 || true)" > /var/lib/quigon/kernel/kern-b
 echo "armed: next boot runs the test kernel once ($(numfmt --to=iec $size)); the one after falls back to KERN-C"
 # The reboot into the test kernel is intentional: don't let quigon-gpu-guard count this (possibly short) boot as an
 # unconfirmed GPU boot, or a few quick test rounds switch the GPU desktop off.

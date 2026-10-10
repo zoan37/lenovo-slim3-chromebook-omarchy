@@ -1,14 +1,21 @@
 #!/bin/bash
-# Run late in every boot. When the system booted from the internal disk (root on ROOT-C, /dev/sda7), mark KERN-C as a
-# known-good kernel and keep it the default: successful=1 and priority above ChromeOS's A/B slots. Until this runs, a
-# freshly written KERN-C has tries=1/successful=0, so a failed boot falls back to ChromeOS on its own.
+# Run late in every boot from the internal disk (root on ROOT-C, /dev/sda7). Keeps the boot order:
+#   KERN-B  mainline default (quigon-kernel): tries handed back after each boot that got this far
+#   KERN-C  Omarchy on the ChromeOS kernel: always successful, the fallback, above ChromeOS's own KERN-A
+# A test kernel (quigon.test=, quigon-test-kernel) is left alone: it runs once. Booted on KERN-C, quigon-kernel
+# fallback puts a mainline kernel that booted before back into KERN-B (after a test, or when the default failed).
 set -u
 root=$(findmnt -no SOURCE /)
 [[ $root == /dev/sda7 ]] || exit 0
 show() { quigon-cgpt show -i "$1" "$2" /dev/sda; }
-# above ChromeOS's slots, but only those marked successful: an armed test kernel in KERN-B (quigon-test-kernel,
-# successful=0) must stay above KERN-C, or the firmware never tries it
-prio=$(( $(for i in 2 4; do [[ $(show $i -S) == 1 ]] && show $i -P; done | sort -n | tail -1) + 1 ))
-(( prio < $(show 6 -P) )) && prio=$(show 6 -P)
+cmd=$(cat /proc/cmdline)
+case " $cmd " in
+  *" quigon.test="*) echo "quigon-boot-good: test kernel, boot order unchanged"; exit 0 ;;
+  *" quigon.default="*) exec /usr/local/sbin/quigon-kernel boot-ok ;;
+esac
+# the ChromeOS kernel (KERN-C): successful, above KERN-A
+prio=$(show 6 -P); a=$(show 2 -P)
+(( prio > a )) || prio=$((a + 1))
 quigon-cgpt add -i 6 -S 1 -T 0 -P "$prio" /dev/sda
 echo "quigon-boot-good: KERN-C successful, priority $prio"
+/usr/local/sbin/quigon-kernel fallback

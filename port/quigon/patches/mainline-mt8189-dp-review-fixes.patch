@@ -1,0 +1,289 @@
+From b10d21e66984e54b3e816146f7e5e18c890892e8 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 14:08:58 -0400
+Subject: [PATCH] drm/mediatek: USB-C DP and external CRTC fixes from review
+
+- mtk_dp_v2: no PM notifier (it powered the DP TX off before mediatek-drm disabled the pipe); resume re-links a
+  sink that stayed plugged in over the sleep (no HPD edge follows the port reset); NULL-guard the connector in
+  disconnect_release; drop dead !mtk_dp branches that dereferenced it.
+- mtk_crtc: recompute the output slot on every enable, not only on connectors_changed; refuse hw_init with an
+  empty slot; skip it in destroy.
+- mtk-mutex: MT8189 COLOR1 is mod 7, not 4 (RDMA0).
+---
+ drivers/gpu/drm/mediatek/mtk_crtc.c  |  17 +++-
+ drivers/gpu/drm/mediatek/mtk_dp_v2.c | 140 +++++++++++++--------------
+ drivers/soc/mediatek/mtk-mutex.c     |   2 +-
+ 3 files changed, 83 insertions(+), 76 deletions(-)
+
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.c b/drivers/gpu/drm/mediatek/mtk_crtc.c
+index cef37c184..25653c283 100644
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.c
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.c
+@@ -146,7 +146,8 @@ static void mtk_crtc_destroy(struct drm_crtc *crtc)
+ 		struct mtk_ddp_comp *comp;
+ 
+ 		comp = mtk_crtc->ddp_comp[i];
+-		mtk_ddp_comp_unregister_vblank_cb(comp);
++		if (comp)	/* the output slot stays empty until the CRTC was first enabled */
++			mtk_ddp_comp_unregister_vblank_cb(comp);
+ 	}
+ 
+ 	drm_crtc_cleanup(crtc);
+@@ -352,6 +353,13 @@ static int mtk_crtc_ddp_hw_init(struct mtk_crtc *mtk_crtc)
+ 	if (WARN_ON(!crtc->state))
+ 		return -EINVAL;
+ 
++	/* a CRTC with connector routes has no output until one of them matched the encoder in use */
++	for (i = 0; i < mtk_crtc->ddp_comp_nr; i++)
++		if (!mtk_crtc->ddp_comp[i]) {
++			drm_err(dev, "crtc %d has no output for its encoder\n", drm_crtc_index(crtc));
++			return -EINVAL;
++		}
++
+ 	width = crtc->state->adjusted_mode.hdisplay;
+ 	height = crtc->state->adjusted_mode.vdisplay;
+ 	vrefresh = drm_mode_vrefresh(&crtc->state->adjusted_mode);
+@@ -694,9 +702,10 @@ static void mtk_crtc_update_output(struct drm_crtc *crtc,
+ 	struct mtk_drm_private *priv;
+ 	unsigned int encoder_mask = crtc_state->encoder_mask;
+ 
+-	if (!crtc_state->connectors_changed)
+-		return;
+-
++	/*
++	 * Recompute on every enable, not only when connectors_changed: a CRTC turned off (DPMS) while its connector
++	 * was swapped for another comes back with only active_changed, and kept the old output in its last slot.
++	 */
+ 	if (!mtk_crtc->num_conn_routes)
+ 		return;
+ 
+diff --git a/drivers/gpu/drm/mediatek/mtk_dp_v2.c b/drivers/gpu/drm/mediatek/mtk_dp_v2.c
+index 4ab946e16..abe2700fd 100644
+--- a/drivers/gpu/drm/mediatek/mtk_dp_v2.c
++++ b/drivers/gpu/drm/mediatek/mtk_dp_v2.c
+@@ -4298,17 +4298,21 @@ static void mtk_dp_disconnect_release_v2(struct mtk_dp *mtk_dp)
+ 		mtk_dp_video_mute_v2(mtk_dp, DP_SST_ENCODER_PORT, true);
+ 		mtk_dp_audio_mute_v2(mtk_dp, DP_SST_ENCODER_PORT, true);
+ 		mtk_dp_video_disable_v2(mtk_dp, DP_SST_ENCODER_PORT);
+-		mtk_dp->mtk_con[DP_FIRST_CON]->video_enable = false;
++		if (mtk_dp->mtk_con[DP_FIRST_CON])
++			mtk_dp->mtk_con[DP_FIRST_CON]->video_enable = false;
+ 	}
+ 
+-	memset(mtk_dp->mtk_con[DP_FIRST_CON]->dsc_dpcd, 0,
+-	       sizeof(mtk_dp->mtk_con[DP_FIRST_CON]->dsc_dpcd));
+-	mtk_dp->mtk_con[DP_FIRST_CON]->fec_cap = 0;
++	/* quigon: no connector when mediatek-drm never bound or creating it failed */
++	if (mtk_dp->mtk_con[DP_FIRST_CON]) {
++		memset(mtk_dp->mtk_con[DP_FIRST_CON]->dsc_dpcd, 0,
++		       sizeof(mtk_dp->mtk_con[DP_FIRST_CON]->dsc_dpcd));
++		mtk_dp->mtk_con[DP_FIRST_CON]->fec_cap = 0;
+ 
+-	mutex_lock(&mtk_dp->mtk_con[DP_FIRST_CON]->edid_lock);
+-	kfree(mtk_dp->mtk_con[DP_FIRST_CON]->edid);
+-	mtk_dp->mtk_con[DP_FIRST_CON]->edid = NULL;
+-	mutex_unlock(&mtk_dp->mtk_con[DP_FIRST_CON]->edid_lock);
++		mutex_lock(&mtk_dp->mtk_con[DP_FIRST_CON]->edid_lock);
++		kfree(mtk_dp->mtk_con[DP_FIRST_CON]->edid);
++		mtk_dp->mtk_con[DP_FIRST_CON]->edid = NULL;
++		mutex_unlock(&mtk_dp->mtk_con[DP_FIRST_CON]->edid_lock);
++	}
+ 
+ 	mtk_dp_hdcp_disable(mtk_dp);
+ 
+@@ -6162,6 +6166,41 @@ static void mtk_dp_init_property_v2(struct mtk_dp *mtk_dp)
+ 	mtk_dp->init_property = true;
+ }
+ 
++/*
++ * Bring a plugged-in sink up: lane flip, PHY, sink caps, link power and training. -ENODEV when the cable went away
++ * while waiting for the sink. Used by the HPD thread, and by resume for a monitor that stayed plugged in over the
++ * sleep (resume resets the port, and no HPD edge follows).
++ */
++static int mtk_dp_hpd_connect_v2(struct mtk_dp *mtk_dp)
++{
++	int i;
++
++	if (mtk_dp->phy_flip_pin)
++		mtk_dp->phy_flip_enable = gpiod_get_value_cansleep(mtk_dp->phy_flip_pin);
++
++	mtk_dp_init_property_v2(mtk_dp);
++	mtk_dp_initial_setting_v2(mtk_dp);
++	mtk_dp_analog_power_on_v2(mtk_dp);
++	mtk_dp_phy_setting_v2(mtk_dp);
++
++	for (i = 0; i < DP_CHECK_SINK_CAP_TIMEOUT_COUNT; i++) {
++		if (mtk_dp_check_sink_cap_v2(mtk_dp))
++			break;
++
++		if (!mtk_dp->training_info.cable_plug_in)
++			return -ENODEV;
++
++		msleep(100);
++	}
++
++	if (drm_dp_link_power_up(&mtk_dp->aux, mtk_dp->training_info.dpcd_rev))
++		return -EIO;
++
++	mtk_dp_training_handle_v2(mtk_dp);
++
++	return 0;
++}
++
+ static irqreturn_t mtk_dp_hpd_event_thread_v2(int hpd, void *dev)
+ {
+ 	struct mtk_dp *mtk_dp = dev;
+@@ -6231,30 +6270,12 @@ static irqreturn_t mtk_dp_hpd_event_thread_v2(int hpd, void *dev)
+ 		} else {
+ 			drm_dbg_kms(mtk_dp->drm_dev, "[DPTX] HPD_CON\n");
+ 
+-			if (mtk_dp->phy_flip_pin)
+-				mtk_dp->phy_flip_enable = gpiod_get_value_cansleep(mtk_dp->phy_flip_pin);
+-
+-			mtk_dp_init_property_v2(mtk_dp);
+-			mtk_dp_initial_setting_v2(mtk_dp);
+-			mtk_dp_analog_power_on_v2(mtk_dp);
+-			mtk_dp_phy_setting_v2(mtk_dp);
+-
+-			for (i = 0; i < DP_CHECK_SINK_CAP_TIMEOUT_COUNT; i++) {
+-				if (mtk_dp_check_sink_cap_v2(mtk_dp))
+-					break;
+-
+-				if (!mtk_dp->training_info.cable_plug_in)
+-					goto end;
+-
+-				msleep(100);
+-			}
+-
+-			ret = drm_dp_link_power_up(&mtk_dp->aux, mtk_dp->training_info.dpcd_rev);
+-			if (ret != 0)
++			ret = mtk_dp_hpd_connect_v2(mtk_dp);
++			if (ret == -ENODEV)
++				goto end;
++			if (ret)
+ 				return IRQ_NONE;
+ 
+-			mtk_dp_training_handle_v2(mtk_dp);
+-
+ 			mtk_dp_hotplug_uevent_v2(mtk_dp);
+ 		}
+ 	}
+@@ -6465,10 +6486,8 @@ static int mtk_dp_suspend_v2(struct device *dev)
+ {
+ 	struct mtk_dp *mtk_dp = dev_get_drvdata(dev);
+ 
+-	if (!mtk_dp) {
+-		drm_dbg_kms(mtk_dp->drm_dev, "[DPTX] suspend, dp not initial\n");
++	if (!mtk_dp)
+ 		return 0;
+-	}
+ 
+ 	if (mtk_dp->disp_state == DP_DISP_STATE_SUSPENDING ||
+ 	    mtk_dp->disp_state == DP_DISP_STATE_SUSPEND) {
+@@ -6507,10 +6526,8 @@ static int mtk_dp_resume_v2(struct device *dev)
+ 	struct mtk_dp *mtk_dp = dev_get_drvdata(dev);
+ 	int ret = 0;
+ 
+-	if (!mtk_dp) {
+-		drm_dbg_kms(mtk_dp->drm_dev, "[DPTX] resume, dp not initial\n");
++	if (!mtk_dp)
+ 		return 0;
+-	}
+ 
+ 	if (mtk_dp->disp_state == DP_DISP_STATE_RESUME) {
+ 		drm_dbg_kms(mtk_dp->drm_dev, "[DPTX] have resumed and do nothing\n");
+@@ -6535,6 +6552,16 @@ static int mtk_dp_resume_v2(struct device *dev)
+ 	if (mtk_dp->vdisp_ao_dev)
+ 		mtk_mmsys_default_config(mtk_dp->vdisp_ao_dev);
+ 
++	/*
++	 * quigon: mtk_dp_init_port_v2() forgot the sink. With the monitor still plugged in there is no HPD edge to bring
++	 * it back, and mediatek-drm re-enables the bridge right after this, which needs a trained link.
++	 */
++	if (mtk_dp_hpd_get_pin_level_v2(mtk_dp)) {
++		mtk_dp->training_info.cable_plug_in = true;
++		if (mtk_dp_hpd_connect_v2(mtk_dp))
++			dev_warn(dev, "[DPTX] sink did not come back after resume\n");
++	}
++
+ 	mtk_dp_hpd_interrupt_enable_v2(mtk_dp, true);
+ 
+ 	drm_dbg_kms(mtk_dp->drm_dev, "[DPTX] resume done\n");
+@@ -6543,28 +6570,6 @@ static int mtk_dp_resume_v2(struct device *dev)
+ }
+ #endif
+ 
+-static int mtk_drm_dp_notifier_v2(struct notifier_block *notifier,
+-			       unsigned long pm_event, void *unused)
+-{
+-	struct mtk_dp *mtk_dp = container_of(notifier, struct mtk_dp, notifier);
+-	struct device *dev = mtk_dp->dev;
+-
+-	drm_dbg_kms(mtk_dp->drm_dev,
+-		    "[DPTX] %s pm_event %lu dev %s usage_count %d nb priority %d\n",
+-		    __func__, pm_event, dev_name(dev), atomic_read(&dev->power.usage_count),
+-		    notifier->priority);
+-
+-	switch (pm_event) {
+-	case PM_SUSPEND_PREPARE:
+-		mtk_dp_suspend_v2(dev);
+-		return NOTIFY_OK;
+-	case PM_POST_SUSPEND:
+-		mtk_dp_resume_v2(dev);
+-		return NOTIFY_OK;
+-	}
+-	return NOTIFY_DONE;
+-}
+-
+ /*
+  * quigon: everything probe sets up is undone by devm, so a deferred probe (the flip GPIO lives on the EC, whose GPIO
+  * driver is a module) leaves no stale bridge, power-domain device, IRQ or audio device behind.
+@@ -6605,13 +6610,6 @@ static void mtk_dp_wq_fini_v2(void *data)
+ 	destroy_workqueue(data);
+ }
+ 
+-static void mtk_dp_notifier_fini_v2(void *data)
+-{
+-	struct mtk_dp *mtk_dp = data;
+-
+-	unregister_pm_notifier(&mtk_dp->notifier);
+-}
+-
+ static int mtk_dp_pm_init_v2(struct mtk_dp *mtk_dp, struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -6766,12 +6764,12 @@ static int mtk_drm_dp_probe_v2(struct platform_device *pdev)
+ 
+ 	dev_dbg(mtk_dp->dev, "pclk:%ld\n", clk_get_rate(mtk_dp->pclk));
+ 
+-	mtk_dp->notifier.notifier_call = mtk_drm_dp_notifier_v2;
+-	ret = register_pm_notifier(&mtk_dp->notifier);
+-	if (ret)
+-		dev_err(mtk_dp->dev, "[DPTX] register pm notifier failed %d", ret);
+-	else
+-		devm_add_action_or_reset(dev, mtk_dp_notifier_fini_v2, mtk_dp);
++	/*
++	 * quigon: no PM notifier. ChromeOS powers the DP TX off from PM_SUSPEND_PREPARE, which is before mediatek-drm.s
++	 * .prepare disables the pipe and with it this bridge (register writes into a powered-off block; Chrome turns
++	 * the displays off first, a plain systemctl suspend does not). The dev_pm_ops below run after .prepare and
++	 * resume before .complete.
++	 */
+ 
+ 	for_each_of_graph_port(np, port) {
+ 		if (i >= mtk_dp->data->encoder_num)
+diff --git a/drivers/soc/mediatek/mtk-mutex.c b/drivers/soc/mediatek/mtk-mutex.c
+index 0455f4d2d..998236b54 100644
+--- a/drivers/soc/mediatek/mtk-mutex.c
++++ b/drivers/soc/mediatek/mtk-mutex.c
+@@ -187,7 +187,7 @@
+ #define MT8189_MUTEX_MOD_DISP_RDMA0		4
+ #define MT8189_MUTEX_MOD_DISP_RDMA1		5
+ #define MT8189_MUTEX_MOD_DISP_COLOR0		6
+-#define MT8189_MUTEX_MOD_DISP_COLOR1		4
++#define MT8189_MUTEX_MOD_DISP_COLOR1		7
+ #define MT8189_MUTEX_MOD_DISP_CCORR0		8
+ #define MT8189_MUTEX_MOD_DISP_CCORR1		9
+ #define MT8189_MUTEX_MOD_DISP_CCORR2		10
+-- 
+2.43.0
+

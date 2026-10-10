@@ -1,0 +1,123 @@
+#!/bin/bash
+# quigon-kernel: the mainline kernel as the default boot, Omarchy on the ChromeOS kernel (KERN-C) as the fallback.
+#   KERN-B holds the mainline kernel at a priority above KERN-A and KERN-C, with successful=0 and tries=2: the
+#   firmware takes a try at every boot, and boot-good gives the tries back once a boot gets to multi-user. A kernel
+#   that fails to come up twice in a row (hang, panic, watchdog reset) runs out of tries, and the firmware boots
+#   KERN-C. boot-good then puts the previous default back into KERN-B, if there was one (the next reboot is mainline
+#   again); a test kernel (quigon-test-kernel) is followed by the default the same way.
+#
+#   quigon-kernel install <fit> <cmdline-file> <tag> [release]   make this kernel the default; the old one becomes
+#                         the previous (the rollback). <release> is its modules directory, kept when pruning.
+#   quigon-kernel status
+#   quigon-kernel restore [previous]   write the default (or the previous) back into KERN-B
+#   quigon-kernel off                  boot KERN-C by default again (KERN-B priority 0; `restore` undoes it)
+#   quigon-kernel boot-ok | fallback   called by boot-good
+# The cmdline gets root=PARTUUID=%U/PARTNROFF=3 (the firmware fills in KERN-B's GUID; KERN-B + 3 = ROOT-C, sda7),
+# so a USB stick that probes first can't take sda, and quigon.default=<tag> (boot-good keys off it).
+# State in /var/lib/quigon/kernel: {default,previous}.{fit,cmdline,tag,release}, and kern-b ("default <tag>",
+# "previous <tag>", "test <tag>" or "off"): what KERN-B holds.
+set -euo pipefail
+K=/usr/local/share/quigon/devkeys
+S=/var/lib/quigon/kernel
+D=/dev/sda
+mkdir -p $S
+cgpt() { quigon-cgpt "$@"; }
+log() { echo "quigon-kernel: $*"; logger -t quigon-kernel -- "$*" 2>/dev/null || true; }
+prio() { cgpt show -i "$1" -P $D; }
+status() {
+  for i in 2 4 6; do echo "$(cgpt show -i $i -l $D): prio=$(prio $i) tries=$(cgpt show -i $i -T $D) ok=$(cgpt show -i $i -S $D)"; done
+  echo "KERN-B holds: $(cat $S/kern-b 2>/dev/null || echo unknown)"
+  for w in default previous; do
+    if [[ -f $S/$w.tag ]]; then echo "$w: $(cat $S/$w.tag) ($(cat $S/$w.release 2>/dev/null || echo '?'))"; fi
+  done
+  grep -o "quigon\.\(default\|test\)=[^ ]*" /proc/cmdline || echo "running: ChromeOS kernel (KERN-C)"
+}
+
+# write <which>: sign default|previous, write it to KERN-B, arm it above KERN-A/C with 2 tries
+write() {
+  local w=$1 out=$S/kern-b.bin
+  [[ -f $S/$w.fit ]] || { log "no $w kernel to write"; return 1; }
+  printf 'fake' > $S/bootloader.bin   # depthcharge ignores it on arm64
+  futility vbutil_kernel --pack $out --keyblock $K/kernel.keyblock --signprivate $K/kernel_data_key.vbprivk \
+    --version 1 --config $S/$w.cmdline --bootloader $S/bootloader.bin --vmlinuz $S/$w.fit --arch aarch64 >/dev/null
+  (( $(stat -c %s $out) <= 32 * 1024 * 1024 )) || { log "$w kernel is over KERN-B's 32 MiB"; return 1; }
+  futility vbutil_kernel --verify $out >/dev/null
+  [[ -f /root/kern-backup/kern-b-chromeos.bin ]] || { install -d -m700 /root/kern-backup; dd if=${D}4 of=/root/kern-backup/kern-b-chromeos.bin bs=1M status=none; }
+  dd if=$out of=${D}4 bs=1M conv=fsync status=none
+  rm -f $out
+  arm
+  echo "$w $(cat $S/$w.tag)" > $S/kern-b
+  log "KERN-B: $w kernel $(cat $S/$w.tag) armed (2 tries per boot, KERN-C as the fallback)"
+}
+# above KERN-A and KERN-C, 2 tries
+arm() {
+  local p; p=$(( $(printf '%s\n' "$(prio 2)" "$(prio 6)" | sort -n | tail -1) + 1 ))
+  cgpt add -i 4 -P "$p" -T 2 -S 0 $D
+}
+
+# keep the modules of the running kernel, the default and the previous; drop other default-build releases
+prune_modules() {
+  local keep r
+  keep=" $(uname -r) $(cat $S/default.release $S/previous.release 2>/dev/null | tr '\n' ' ' || true) "
+  for r in /usr/lib/modules/*-quigon-*; do
+    [[ -d $r ]] || continue
+    [[ $keep == *" ${r##*/} "* ]] && continue
+    rm -rf -- "$r"; log "removed modules of $(basename "$r")"
+  done
+}
+
+case ${1:-} in
+  install)
+    fit=${2:?FIT image}; cfg=${3:?cmdline file}; tag=${4:?tag}; rel=${5:-}
+    [[ $tag =~ ^[A-Za-z0-9._-]+$ ]] || { echo "tag: letters, digits, . _ -"; exit 2; }
+    [[ -z $rel || -d /usr/lib/modules/$rel ]] || { echo "no /usr/lib/modules/$rel: install the modules first"; exit 1; }
+    if [[ -f $S/default.fit ]]; then
+      for e in fit cmdline tag release; do [[ -f $S/default.$e ]] && mv -f $S/default.$e $S/previous.$e; done
+    fi
+    cp "$fit" $S/default.fit
+    # the test-boot keys and any root= give way to the slot-relative root and the default marker
+    sed -E 's/(^| )(quigon\.test|quigon\.default|root)=[^ ]*//g; s/  +/ /g; s/^ //; s/ $//' "$cfg" |
+      { read -r c; echo "$c root=PARTUUID=%U/PARTNROFF=3 quigon.default=$tag"; } > $S/default.cmdline
+    echo "$tag" > $S/default.tag
+    if [[ -n $rel ]]; then echo "$rel" > $S/default.release; else rm -f $S/default.release; fi
+    write default
+    prune_modules
+    status ;;
+  status) status ;;
+  restore) write "${2:-default}"; status ;;
+  off) cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b; log "mainline default off: KERN-C boots"; status ;;
+  boot-ok)
+    # booted the KERN-B kernel to multi-user: give the tries back, keep it above KERN-A/C
+    tag=$(grep -o "quigon\.default=[^ ]*" /proc/cmdline | cut -d= -f2)
+    arm
+    held=$(cat $S/kern-b 2>/dev/null || true)
+    if [[ ${held#* } == "$tag" && ${held%% *} == previous ]]; then
+      # the rollback came up: it is the default again, the failed kernel stays around as the previous
+      for e in fit cmdline tag release; do
+        [[ -f $S/default.$e ]] && mv -f $S/default.$e $S/failed.$e
+        [[ -f $S/previous.$e ]] && mv -f $S/previous.$e $S/default.$e
+        [[ -f $S/failed.$e ]] && mv -f $S/failed.$e $S/previous.$e
+      done
+      echo "default $tag" > $S/kern-b
+    fi
+    log "booted mainline $tag from KERN-B; 2 tries armed for the next boot" ;;
+  fallback)
+    # booted KERN-C. After a test kernel, or when the default ran out of tries, put a kernel that booted before back.
+    held=$(cat $S/kern-b 2>/dev/null || echo none)
+    tries=$(cgpt show -i 4 -T $D)
+    case ${held%% *} in
+      test)
+        if [[ -f $S/default.fit ]]; then log "after test kernel ${held#* }: default back in KERN-B"; write default; fi ;;
+      default)
+        if (( tries == 0 )); then
+          log "mainline ${held#* } did not come up twice: on the ChromeOS kernel"
+          if [[ -f $S/previous.fit ]]; then write previous; else cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b; fi
+        fi ;;
+      previous)
+        if (( tries == 0 )); then
+          log "the previous kernel ${held#* } did not come up either: KERN-C is the default"
+          cgpt add -i 4 -P 0 -T 0 -S 0 $D; echo off > $S/kern-b
+        fi ;;
+    esac ;;
+  *) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
+esac

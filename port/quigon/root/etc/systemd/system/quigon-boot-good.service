@@ -1,5 +1,5 @@
 [Unit]
-Description=Mark the internal Omarchy kernel (KERN-C) good once it has booted
+Description=Keep the boot order: mainline default (KERN-B), Omarchy on the ChromeOS kernel (KERN-C) as the fallback
 After=multi-user.target
 
 [Service]
