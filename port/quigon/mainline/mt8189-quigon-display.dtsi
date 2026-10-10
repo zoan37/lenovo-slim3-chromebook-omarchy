@@ -12,6 +12,13 @@
 #include <dt-bindings/gpio/gpio.h>
 
 / {
+	/* mediatek-drm numbers the display blocks by alias: without them, every OVL/RDMA is "0" */
+	aliases {
+		ovl0 = &disp_ovl0;
+		rdma0 = &disp_rdma0;
+		dvo0 = &disp_dvo0;
+	};
+
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pinctrl-names = "default";

@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * USB-C DisplayPort for quigon: the second display pipe OVL1 -> RDMA1 -> (mmsys crossbar) -> DVO1 -> DP TX. The EC
+ * enters DP alt mode and muxes the Type-C lanes; it drives the DP TX HPD pin (GPIO 27) and reports the plug
+ * orientation on its GPIO 7, which the DP TX reads to flip its PHY lanes. The DP PHY shares the SSUSB power domain
+ * with the USB3 PHY. Nodes and board wiring from ChromeOS's mt8189.dtsi and mt8189-skywalker.dtsi; driver:
+ * mtk_dp_v2 (DRM_MEDIATEK_DP_V2). Include after mt8189-quigon-hdmi.dtsi (OVL1/RDMA1, the external CRTC).
+ */
+
+/ {
+	aliases {
+		dvo1 = &disp_dvo1;
+	};
+
+	soc {
+		dp_tx: dp-tx@11b60000 {
+			compatible = "mediatek,mt8189-dp-tx";
+			reg = <0 0x11b60000 0 0x5000>,
+			      <0 0x11c10000 0 0x1500>,
+			      <0 0x10011018 0 0x4>,
+			      <0 0x1c001e80 0 0x4>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DP_TX>,
+					<&spm MT8189_POWER_DOMAIN_SSUSB>;
+			power-domain-names = "pd_dp_tx", "pd_dp_phy";
+			interrupts = <GIC_SPI 199 IRQ_TYPE_LEVEL_HIGH 0>;
+			#phy-cells = <0>;
+			clocks = <&topckgen CLK_TOP_DP_SEL>, <&clk26m>;
+			clock-names = "mux_dp", "ck_26m";
+			#sound-dai-cells = <0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&dp_hpd_pins>;
+			mediatek,phy-flip-gpios = <&cros_ec 7 GPIO_ACTIVE_HIGH>;
+			phy-by-link-rate;
+			phy-params = <0x221a1612 0x2425201a 0x3028 0xe080400 0x20b0600 0x08>;
+			phy-params-hbr2 = <0x20181410 0x22241e18 0x3028 0x10080400 0x20c0600 0x08>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					dptx_in0: endpoint {
+						remote-endpoint = <&disp_dvo1_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					dptx_out: endpoint {
+						data-lanes = <0 1 2 3>;
+					};
+				};
+			};
+		};
+
+		disp_dvo1: dvo@14018000 {
+			compatible = "mediatek,mt8189-dp-dvo";
+			reg = <0 0x14018000 0 0x1000>;
+			interrupts = <GIC_SPI 357 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DP_INTF>,
+				 <&topckgen CLK_TOP_DP_SEL>,
+				 <&apmixedsys CLK_APMIXED_TVDPLL1>,
+				 <&clk26m>,
+				 <&mmsys CLK_MM_DP_INTF0>;
+			clock-names = "engine", "pixel", "pll", "dvo_clk", "hf_fdvo_clk";
+
+			port {
+				disp_dvo1_out: endpoint {
+					remote-endpoint = <&dptx_in0>;
+				};
+			};
+		};
+	};
+};
+
+&spm {
+	power-domain@MT8189_POWER_DOMAIN_DP_TX {
+		reg = <MT8189_POWER_DOMAIN_DP_TX>;
+		#power-domain-cells = <0>;
+	};
+};
+
+&pio {
+	dp_hpd_pins: dp-hpd-pins {
+		pins-dp-hpd {
+			pinmux = <PINMUX_GPIO27__FUNC_DP_TX_HPD>;
+			bias-disable;
+		};
+	};
+};

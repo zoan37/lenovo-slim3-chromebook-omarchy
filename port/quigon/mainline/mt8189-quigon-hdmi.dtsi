@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * HDMI port for quigon: the second display pipe OVL1 -> RDMA1 -> (mmsys crossbar) -> DSI0 -> ITE IT61620 (DSI to
+ * HDMI bridge, I2C6 0x58) -> HDMI type A connector. The same CRTC can drive DVO1 -> DP TX (USB-C) instead; the DRM
+ * driver picks the route by the connector in use. Nodes and board wiring from ChromeOS's mt8189.dtsi and
+ * mt8189-skywalker.dtsi. Include after mt8189-quigon-display.dtsi and mt8189-quigon-input.dtsi (pp3300_z1).
+ */
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	aliases {
+		ovl1 = &disp_ovl1;
+		rdma1 = &disp_rdma1;
+		dsi0 = &dsi0;
+	};
+
+	/* IT61620 core supply (1.0 V), GPIO 135 */
+	pp1000_hdmi_x: regulator-pp1000-hdmi-x {
+		compatible = "regulator-fixed";
+		regulator-name = "pp1000_hdmi_x";
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1000000>;
+		enable-active-high;
+		regulator-enable-ramp-delay = <2000>;
+		gpio = <&pio 135 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmi_pwr_pins>;
+		vin-supply = <&pp3300_z1>;
+	};
+
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		label = "hdmi";
+		type = "a";
+		pinctrl-names = "default";
+		pinctrl-0 = <&hdmi_hpd_pins>;
+		hpd-gpios = <&pio 139 GPIO_ACTIVE_LOW>;
+
+		port {
+			hdmi_connector_in: endpoint {
+				remote-endpoint = <&it61620_hdmi_out>;
+			};
+		};
+	};
+
+	soc {
+		mipi_tx0: dsi-phy@11b40000 {
+			compatible = "mediatek,mt8189-mipi-tx";
+			reg = <0 0x11b40000 0 0x1000>;
+			clocks = <&clk26m>;
+			#clock-cells = <0>;
+			#phy-cells = <0>;
+			clock-output-names = "mipi_tx0_pll";
+		};
+
+		disp_ovl1: ovl@14003000 {
+			compatible = "mediatek,mt8189-disp-ovl";
+			reg = <0 0x14003000 0 0x1000>;
+			interrupts = <GIC_SPI 304 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DISP_OVL1_4L>;
+		};
+
+		disp_rdma1: rdma@14007000 {
+			compatible = "mediatek,mt8189-disp-rdma";
+			reg = <0 0x14007000 0 0x1000>;
+			interrupts = <GIC_SPI 309 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MM_DISP_RDMA1>;
+		};
+
+		dsi0: dsi@14016000 {
+			compatible = "mediatek,mt8189-dsi";
+			reg = <0 0x14016000 0 0x1000>;
+			interrupts = <GIC_SPI 326 IRQ_TYPE_LEVEL_HIGH 0>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_DISP>;
+			clocks = <&mmsys CLK_MMSYS_0_DISP_DSI0>,
+				 <&mmsys CLK_MMSYS_1_DISP_DSI0>,
+				 <&mipi_tx0>;
+			clock-names = "engine", "digital", "hs";
+			phys = <&mipi_tx0>;
+			phy-names = "dphy";
+			/* skywalker: longer HS-zero for the IT61620's receiver */
+			mediatek,phy-timing-da-hs-zero = <6>;
+
+			port {
+				dsi_out: endpoint {
+					remote-endpoint = <&it61620_dsi_in>;
+				};
+			};
+		};
+	};
+};
+
+&i2c6 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c6_pins>;
+	status = "okay";
+
+	hdmi_bridge: hdmi-bridge@58 {
+		compatible = "ite,it61620";
+		reg = <0x58>;
+		#sound-dai-cells = <0>;
+		interrupts-extended = <&pio 128 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&it61620_pins>;
+		reset-gpios = <&pio 127 GPIO_ACTIVE_LOW>;
+		ivdd-supply = <&pp1000_hdmi_x>;
+		ovdd-supply = <&mt6359_vio28_ldo_reg>;
+		ovdd1833-supply = <&mt6359_vcamio_ldo_reg>;
+		dsi-lanes = <4>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				it61620_dsi_in: endpoint {
+					remote-endpoint = <&dsi_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				it61620_hdmi_out: endpoint {
+					remote-endpoint = <&hdmi_connector_in>;
+				};
+			};
+		};
+	};
+};
+
+/* the bridge's I/O rails: VIO28 runs at 3.3 V on this board (pp3300_vio28_x), VCAMIO 1.8 V */
+&mt6359_vio28_ldo_reg {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&mt6359_vcamio_ldo_reg {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+};
+
+&pio {
+	i2c6_pins: i2c6-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO63__FUNC_SCL6>,
+				 <PINMUX_GPIO64__FUNC_SDA6>;
+			bias-disable;
+		};
+	};
+
+	hdmi_pwr_pins: hdmi-pwr-pins {
+		pins-pwr {
+			pinmux = <PINMUX_GPIO135__FUNC_GPIO135>;
+			output-low;
+		};
+	};
+
+	hdmi_hpd_pins: hdmi-hpd-pins {
+		pins-hpd {
+			pinmux = <PINMUX_GPIO139__FUNC_GPIO139>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	it61620_pins: it61620-pins {
+		pins-int {
+			pinmux = <PINMUX_GPIO128__FUNC_GPIO128>;
+			input-enable;
+			bias-disable;
+		};
+
+		pins-reset {
+			pinmux = <PINMUX_GPIO127__FUNC_GPIO127>;
+			output-low;
+			bias-pull-up;
+		};
+	};
+};
