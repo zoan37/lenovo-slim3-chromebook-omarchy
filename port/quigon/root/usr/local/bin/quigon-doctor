@@ -119,7 +119,9 @@ check_system() {
 
   section "Audio"
   pacman -Q alsa-card-profiles pipewire-pulse >/dev/null 2>&1 && pass "alsa-card-profiles + pipewire-pulse installed" || fail "alsa-card-profiles or pipewire-pulse missing"
-  [[ -f /usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/HiFi.conf ]] && pass "UCM2 profile for mt8189_1019_rt5682s" || fail "UCM2 profile missing (port/quigon/root/usr/share/alsa/ucm2)"
+  # alsa-ucm-conf layout: conf.d/<driver>/<card>.conf -> MediaTek/mt8189/rt1019p-rt5682s/ (upstream PR #872)
+  [[ -f /usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/mt8189_1019_rt5682s.conf && -f /usr/share/alsa/ucm2/MediaTek/mt8189/rt1019p-rt5682s/HiFi.conf ]] &&
+    pass "UCM2 profile for mt8189_1019_rt5682s" || fail "UCM2 profile missing (port/quigon/root/usr/share/alsa/ucm2)"
 
   section "Omarchy patches"
   local qs; qs=$(pacman -Q quickshell 2>/dev/null | awk '{print $2}')
