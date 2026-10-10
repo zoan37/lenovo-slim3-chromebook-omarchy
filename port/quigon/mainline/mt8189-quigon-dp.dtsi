@@ -90,3 +90,14 @@
 		};
 	};
 };
+
+/* DP audio: the AFE's TDM DPTX interface into the DP TX (hdmi-codec) */
+&sound {
+	dai-link-6 {
+		link-name = "TDM_DPTX_BE";
+
+		codec {
+			sound-dai = <&dp_tx>;
+		};
+	};
+};

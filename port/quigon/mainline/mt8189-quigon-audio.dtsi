@@ -16,8 +16,8 @@
  *   Card: mainline's mt8189-nau8825 machine driver, "mediatek,mt8189-rt5682s" variant (ChromeOS: "...-rt5682s-sound").
  *     The card MUST have audio-routing: without it the common MediaTek probe takes the "legacy" path and ignores the
  *     dai-link nodes (every BE gets the dummy codec). Model name kept as ChromeOS's.
- *   Not described: HDMI audio (ITE IT61620 DSI->HDMI bridge, no mainline driver) and DP audio over USB-C (the DP TX
- *     isn't enabled yet); their BE links fall back to the dummy codec.
+ *   HDMI audio (PCM_0_BE -> ITE IT61620) and USB-C DP audio (TDM_DPTX_BE -> DP TX) are added by
+ *     mt8189-quigon-hdmi.dtsi and mt8189-quigon-dp.dtsi.
  *
  * Needs pp3300_z1 (mt8189-quigon-input.dtsi), so include this after it.
  */
