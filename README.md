@@ -88,6 +88,9 @@ Day-to-day health check: `quigon-doctor`.
   skywalker mainline bring-up, pointed at this port.
 - [omacom/omarchy#9211](https://github.com/omacom/omarchy/pull/9211#issuecomment-6102751346): lock-screen wake-key
   PR, test report on 4.0.4.
+- MT8189 video decoder/encoder v11 ([patchwork](https://patchwork.kernel.org/comment/26466141/)): test report
+  (VP9 and encoder fine, Tested-by for the encoder; H.264 needs the VSI layout fix; HEVC advertised and crashes the
+  SCP).
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do
