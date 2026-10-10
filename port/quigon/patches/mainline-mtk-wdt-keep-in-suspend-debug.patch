@@ -1,0 +1,33 @@
+diff --git a/drivers/watchdog/mtk_wdt.c b/drivers/watchdog/mtk_wdt.c
+index b040220c1..3b5b0d281 100644
+--- a/drivers/watchdog/mtk_wdt.c
++++ b/drivers/watchdog/mtk_wdt.c
+@@ -582,10 +582,18 @@ static int mtk_wdt_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++/* quigon bring-up: keep a running watchdog running across system sleep, so a hang in suspend/resume resets the
++ * SoC (a warm reset keeps pstore) instead of hanging forever. Short test sleeps only: nothing feeds it while asleep. */
++static bool keep_in_suspend;
++module_param(keep_in_suspend, bool, 0644);
++
+ static int mtk_wdt_suspend(struct device *dev)
+ {
+ 	struct mtk_wdt_dev *mtk_wdt = dev_get_drvdata(dev);
+ 
++	if (keep_in_suspend)
++		return 0;
++
+ 	if (watchdog_active(&mtk_wdt->wdt_dev))
+ 		mtk_wdt_stop(&mtk_wdt->wdt_dev);
+ 
+@@ -596,6 +604,9 @@ static int mtk_wdt_resume(struct device *dev)
+ {
+ 	struct mtk_wdt_dev *mtk_wdt = dev_get_drvdata(dev);
+ 
++	if (keep_in_suspend)
++		return 0;
++
+ 	if (watchdog_active(&mtk_wdt->wdt_dev)) {
+ 		mtk_wdt_start(&mtk_wdt->wdt_dev);
+ 		mtk_wdt_ping(&mtk_wdt->wdt_dev);

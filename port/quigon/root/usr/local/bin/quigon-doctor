@@ -125,6 +125,11 @@ check_system() {
   if grep -q "/battery_" /usr/bin/omarchy-battery-status 2>/dev/null; then pass "battery panel patch applied"
   elif (( FIX )); then /usr/local/bin/fix-omarchy-battery-status && repaired "re-applied battery panel patch"
   else fail "battery panel patch missing (sudo fix-omarchy-battery-status)"; fi
+  local lid=ok s
+  for s in omarchy-hw-laptop-closed omarchy-system-lid-close omarchy-hyprland-monitor-clamshell; do
+    [[ -x /usr/local/bin/$s && -x /usr/bin/$s ]] || lid="$s (quigon shim in /usr/local/bin or Omarchy's in /usr/bin) missing"
+  done
+  [[ $lid == ok ]] && pass "lid close locks and blanks (SW_LID shims)" || fail "lid: $lid; a lid close won't lock"
 }
 
 check_session() {

@@ -1,0 +1,12 @@
+#!/bin/bash
+# quigon: Omarchy reads the lid from /proc/acpi/button/lid, which an ARM Chromebook doesn't have, so a lid close never
+# counted as closed (no lock on lid close, no clamshell). The EC reports the lid as SW_LID on its buttons input device
+# (cros_ec_buttons, under both kernels); ask every device that has that switch, then fall back to Omarchy's check.
+# Shadows /usr/bin/omarchy-hw-laptop-closed through PATH (/usr/local/bin first). Exit 0 = closed.
+for d in /sys/class/input/event*; do
+  caps=$(<"$d/device/capabilities/sw") 2>/dev/null || continue
+  (( 0x${caps##* } & 1 )) || continue
+  evtest --query "/dev/input/${d##*/}" EV_SW SW_LID 2>/dev/null
+  [[ $? == 10 ]] && exit 0
+done
+exec /usr/bin/omarchy-hw-laptop-closed
