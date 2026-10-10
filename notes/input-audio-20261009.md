@@ -30,7 +30,7 @@ itself worked (`mem_sleep` is `s2idle` only). Hyprland 0.56's Lua parser accepts
   ALSA device at all. Installing `pipewire-pulse pipewire-alsa` pulled in `alsa-card-profiles`.
 - ChromeOS has an exact UCM v1 profile, `/usr/share/alsa/ucm/mt8189_1019_rt5682s.quigon` (CRAS also has
   `/etc/cras/quigon.rt1019.rt5682s/` with a MaxxChrome DSP plugin, not used). Converted to UCM2:
-  [`port/quigon/root/usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/`](../port/quigon/root/usr/share/alsa/ucm2/conf.d/mt8189_1019_rt5/).
+  [`port/quigon/root/usr/share/alsa/ucm2/MediaTek/mt8189/rt1019p-rt5682s/`](../port/quigon/root/usr/share/alsa/ucm2/MediaTek/mt8189/rt1019p-rt5682s/) (alsa-ucm-conf layout since 2026-10-10, linked from `conf.d/mt8189_1019_rt5/`).
   Changes from ChromeOS's file: no `cdev`, `hw:${CardId},N` PCMs, standard device names (Speaker, Headphones, Mic, Headset),
   `JackControl` (kcontrols `Headphone Jack`, `Headset Mic Jack`) instead of CRAS's `JackDev`, priorities.
 - **PipeWire's ACP probes every PCM before any device EnableSequence runs**, and these MediaTek DPCM front ends reject
