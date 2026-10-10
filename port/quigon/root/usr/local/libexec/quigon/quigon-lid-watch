@@ -1,0 +1,53 @@
+#!/usr/bin/python3 -I
+# quigon-lid-watch: run Omarchy's lid actions from the lid switch itself.
+# Omarchy binds them in Hyprland (switch:on/off:Lid Switch), but under Hyprland 0.56's Lua config no switch binding
+# fires here, whatever the device name (tested with a uinput "Lid Switch"), so a lid close never locked. This reads
+# SW_LID from the input device that has it (cros_ec_buttons, under both kernels) and runs the same commands:
+# omarchy-system-lid-close on close, omarchy-hyprland-monitor-clamshell on open (quigon's wrappers in /usr/local/bin
+# also switch the panel off and on). Started from ~/.config/hypr/autostart.lua; one instance per session (flock).
+import fcntl
+import os
+import subprocess
+import sys
+import time
+
+import evdev
+from evdev import ecodes
+
+ACTIONS = {1: "omarchy-system-lid-close", 0: "omarchy-hyprland-monitor-clamshell"}
+
+
+def lid_device():
+    for path in evdev.list_devices():
+        try:
+            dev = evdev.InputDevice(path)
+        except OSError:
+            continue
+        if ecodes.SW_LID in dev.capabilities().get(ecodes.EV_SW, []):
+            return dev
+        dev.close()
+    return None
+
+
+def main():
+    lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "quigon-lid-watch.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0  # already running in this session
+    while True:
+        dev = lid_device()
+        if dev is None:
+            time.sleep(10)
+            continue
+        try:
+            for ev in dev.read_loop():
+                if ev.type == ecodes.EV_SW and ev.code == ecodes.SW_LID and ev.value in ACTIONS:
+                    subprocess.Popen([ACTIONS[ev.value]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            time.sleep(2)  # device went away (driver reload): find it again
+
+
+if __name__ == "__main__":
+    sys.exit(main())
