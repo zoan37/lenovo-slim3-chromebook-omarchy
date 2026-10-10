@@ -80,6 +80,16 @@ Day-to-day health check: `quigon-doctor`.
   (see [AGENTS.md](AGENTS.md)).
 - `private/`, `artifacts/` — gitignored dumps (firmware, kernel partitions, logs).
 
+## Upstream
+
+- [alsa-project/alsa-ucm-conf#872](https://github.com/alsa-project/alsa-ucm-conf/pull/872): the UCM profile
+  (`ucm2/MediaTek/mt8189/rt1019p-rt5682s`), open.
+- [velvet-os/imagebuilder#448](https://github.com/velvet-os/imagebuilder/issues/448#issuecomment-6102751167):
+  skywalker mainline bring-up, pointed at this port.
+- [omacom/omarchy#9211](https://github.com/omacom/omarchy/pull/9211#issuecomment-6102751346): lock-screen wake-key
+  PR, test report on 4.0.4.
+- The mm/vma mmap error-path fix carried here is already in later linux-next.
+
 ## To do
 
 - Kernel updates: rebase the patches onto newer kernels as MT8189 support lands upstream; send the generic fixes
