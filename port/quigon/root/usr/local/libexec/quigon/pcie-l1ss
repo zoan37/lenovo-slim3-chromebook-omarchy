@@ -1,0 +1,10 @@
+#!/bin/sh
+# Called by udev for the MT7922 (14c3:0616) with its sysfs path. On the mainline kernel only: PCIe L1.1 on, L1.2 off.
+# ChromeOS runs this SoC with L1 substates (CONFIG_PCIEASPM_POWER_SUPERSAVE); on mainline, L1.2 hangs the SoC in
+# s2idle (it goes to sleep and never comes back), L1.1 passed 10/10 sleep cycles and saves ~40 mW. The per-link L1.2
+# disable has to be in place before the policy switch, which applies to every link.
+case $(uname -r) in *-quigon*) ;; *) exit 0 ;; esac
+l=${1:?sysfs path}/link
+[ -w "$l/l1_2_aspm" ] || exit 0
+echo 0 > "$l/l1_2_aspm"; echo 0 > "$l/l1_2_pcipm"
+echo powersupersave > /sys/module/pcie_aspm/parameters/policy

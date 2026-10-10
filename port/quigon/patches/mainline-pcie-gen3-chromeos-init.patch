@@ -1,0 +1,48 @@
+From f50b445d19ce47b604bc94b600ad302cb759628a Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 16:15:16 -0400
+Subject: [PATCH] PCI: mediatek-gen3: L0s off in the MAC, mask AXI slave error
+ responses (as ChromeOS)
+
+---
+ drivers/pci/controller/pcie-mediatek-gen3.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/pci/controller/pcie-mediatek-gen3.c b/drivers/pci/controller/pcie-mediatek-gen3.c
+index ec3d3d1d0..cfa8fb72e 100644
+--- a/drivers/pci/controller/pcie-mediatek-gen3.c
++++ b/drivers/pci/controller/pcie-mediatek-gen3.c
+@@ -87,6 +87,10 @@
+ 	(PCIE_MSI_IRQS_PER_SET * PCIE_MSI_SET_NUM)
+ 
+ #define PCIE_INT_ENABLE_REG		0x180
++#define PCIE_LOW_POWER_CTRL_REG		0x194
++#define PCIE_FORCE_DIS_L0S		BIT(8)
++#define PCIE_AXI_IF_CTRL_REG		0x1a8
++#define PCIE_AXI0_SLV_RESP_MASK		BIT(12)
+ #define PCIE_MSI_ENABLE			GENMASK(PCIE_MSI_SET_NUM + 8 - 1, 8)
+ #define PCIE_MSI_SHIFT			8
+ #define PCIE_INTX_SHIFT			24
+@@ -544,6 +548,19 @@ static int mtk_pcie_startup_port(struct mtk_gen3_pcie *pcie)
+ 	val &= ~PCIE_INTX_ENABLE;
+ 	writel_relaxed(val, pcie->base + PCIE_INT_ENABLE_REG);
+ 
++	/*
++	 * quigon, as ChromeOS's driver: L0s off in the MAC (little saving, costs latency; ChromeOS runs MT8189 with
++	 * L1 substates through s2idle, without L0s), and no AXI slave errors from the bridge (an error response is a
++	 * fatal SError on the CPU side, AER keeps the information).
++	 */
++	val = readl_relaxed(pcie->base + PCIE_LOW_POWER_CTRL_REG);
++	val |= PCIE_FORCE_DIS_L0S;
++	writel_relaxed(val, pcie->base + PCIE_LOW_POWER_CTRL_REG);
++
++	val = readl_relaxed(pcie->base + PCIE_AXI_IF_CTRL_REG);
++	val |= PCIE_AXI0_SLV_RESP_MASK;
++	writel_relaxed(val, pcie->base + PCIE_AXI_IF_CTRL_REG);
++
+ 	/* Disable DVFSRC voltage request */
+ 	val = readl_relaxed(pcie->base + PCIE_MISC_CTRL_REG);
+ 	val |= PCIE_DISABLE_DVFSRC_VLT_REQ;
+-- 
+2.43.0
+

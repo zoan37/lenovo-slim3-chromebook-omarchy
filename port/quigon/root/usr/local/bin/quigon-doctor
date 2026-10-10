@@ -65,6 +65,24 @@ check_system() {
   [[ -f /etc/systemd/logind.conf.d/30-quigon-lock-key.conf ]] && pass "lock key doesn't suspend (logind drop-in)" || fail "logind lock-key drop-in missing"
   swapon --show=NAME --noheadings | grep -q zram && pass "zram swap active" || fail "zram swap not active"
 
+  if [[ $kver == *-quigon* ]]; then
+    section "Mainline kernel"
+    local held; held=$(cat /var/lib/quigon/kernel/kern-b 2>/dev/null)
+    if grep -q "quigon.default=" /proc/cmdline; then
+      pass "booted the default mainline kernel ($(grep -o "quigon\.default=[^ ]*" /proc/cmdline | cut -d= -f2)) from KERN-B"
+    elif grep -q "quigon.test=" /proc/cmdline; then
+      echo "  · test kernel ($(grep -o "quigon\.test=[^ ]*" /proc/cmdline | cut -d= -f2)); the default comes back after the next boot"
+    fi
+    [[ $(quigon-cgpt show -i 4 -T /dev/sda 2>/dev/null) -gt 0 || $held == test* ]] && pass "KERN-B armed ($held)" || fail "KERN-B has no tries left: the next boot is the ChromeOS kernel (quigon-kernel status / restore)"
+    local l1=/sys/bus/pci/devices/0000:01:00.0/link
+    if [[ -r $l1/l1_2_aspm ]]; then
+      [[ $(cat $l1/l1_2_aspm) == 0 ]] && pass "Wi-Fi PCIe link: L1.2 off (it hangs s2idle on mainline)$([[ $(cat $l1/l1_1_aspm) == 1 ]] && echo ", L1.1 on")" ||
+        fail "Wi-Fi PCIe link has L1.2 on: the next suspend will hang the SoC (echo 0 > $l1/l1_2_aspm)"
+    fi
+    [[ -e /dev/tpm0 ]] && pass "GSC TPM (/dev/tpm0)" || fail "no /dev/tpm0 (Ti50 TPM, mt8189-quigon-tpm.dtsi / tpm_tis_i2c_cr50)"
+    grep -qs "mtk-vcodec-enc" /sys/class/video4linux/video*/name && pass "hardware H.264 encoder" || fail "no mtk-vcodec-enc video device"
+  fi
+
   section "GPU"
   if [[ $kver == *-quigon* ]]; then
     # Mainline kernel: Mesa on Panfrost for everything; the libmali setup below is for the ChromeOS kernel.

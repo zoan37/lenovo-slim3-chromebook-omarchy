@@ -1,0 +1,2 @@
+# The built-in Wi-Fi's PCIe link: L1.1 on, L1.2 off, mainline only (see /usr/local/libexec/quigon/pcie-l1ss)
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x14c3", ATTR{device}=="0x0616", RUN+="/usr/local/libexec/quigon/pcie-l1ss /sys%p"
