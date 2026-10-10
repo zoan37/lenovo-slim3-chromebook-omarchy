@@ -5,7 +5,7 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 
 --- a/shell/plugins/lock/LockView.qml
 +++ b/shell/plugins/lock/LockView.qml
-@@ -16,6 +16,11 @@
+@@ -16,6 +16,13 @@
    property bool loadBackground: true
    property string passwordText: ""
    property bool syncingPasswordText: false
@@ -14,10 +14,12 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 +  // quigon: wall-clock time of the lock's last 1 s heartbeat; a key arriving long after it comes from the sleep the
 +  // shell was frozen through (the wake key), whichever of the key and the first post-resume tick is handled first
 +  property double aliveTick: 0
++  property bool swallowWakeKey: false
++  signal wakeKeySwallowed()
  
    readonly property string placeholderText: "Enter Password"
    readonly property int fieldWidth: 381
-@@ -175,7 +180,15 @@
+@@ -175,7 +182,17 @@
          }
  
          Keys.onPressed: function(event) {
@@ -25,8 +27,10 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 +          // The wake clears displaysBlank, so read it first.
 +          var wasBlank = root.displaysBlank
 +          var justResumed = root.aliveTick > 0 && Date.now() - root.aliveTick > 3000
++          var wakeKey = root.swallowWakeKey
            root.wakeRequested()
-+          if (wasBlank || justResumed) {
++          if (wakeKey) root.wakeKeySwallowed()
++          if (wasBlank || justResumed || wakeKey) {
 +            event.accepted = true
 +            return
 +          }
@@ -35,16 +39,19 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
              event.accepted = true
 --- a/shell/plugins/lock/Service.qml
 +++ b/shell/plugins/lock/Service.qml
-@@ -33,6 +33,8 @@
+@@ -33,6 +33,11 @@
    property string lastEventAt: ""
    property bool strandedLock: false
    property bool strandedLockResolved: false
 +  // quigon (from omarchy PR #9211): the lock blanked the panel; a key pressed now is there to wake it, not to type.
 +  property bool displaysBlank: false
++  // quigon: the wake key reaches the lock a moment after the shell thaws, after the first heartbeat has already seen
++  // the resume: swallow the next key for a short while after a detected resume
++  property bool swallowWakeKey: false
  
    readonly property bool locked: lockRequested || sessionLock.locked || sessionLock.secure
    readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating
-@@ -165,11 +167,13 @@
+@@ -165,11 +170,13 @@
    }
  
    function runWake() {
@@ -58,16 +65,18 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
      if (!blankProcess.running) blankProcess.running = true
    }
  
-@@ -280,6 +284,8 @@
+@@ -280,6 +287,10 @@
          onPasswordTextEdited: function(password) { root.enteredPassword = password }
          onSubmitPassword: function(password) { root.submitPassword(password) }
          onClearFailureRequested: root.failureMessage = ""
 +        displaysBlank: root.displaysBlank
 +        aliveTick: resumeWatchTimer.lastTick
++        swallowWakeKey: root.swallowWakeKey
++        onWakeKeySwallowed: { root.swallowWakeKey = false; root.logEvent("wake-key-swallowed") }
          onWakeRequested: root.runWake()
        }
  
-@@ -431,6 +437,29 @@
+@@ -431,6 +442,38 @@
      }
    }
  
@@ -89,9 +98,18 @@ Apply in /usr/share/omarchy with patch -p1 (quigon-omarchy-patches does).
 +      lastTick = now
 +      if (resumed) {
 +        root.logEvent("resume-detected")
++        root.swallowWakeKey = true
++        wakeKeyWindowTimer.restart()
 +        root.runWake()
 +      }
 +    }
++  }
++
++  Timer {
++    id: wakeKeyWindowTimer
++    interval: 2000
++    repeat: false
++    onTriggered: root.swallowWakeKey = false
 +  }
 +
    Timer {
