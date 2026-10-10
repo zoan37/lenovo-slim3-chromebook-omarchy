@@ -1,0 +1,63 @@
+From fa27cb8015af4230ea108e09f7e1d42186e5b850 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 16:35:53 -0400
+Subject: [PATCH] drm/bridge: it61620: provide the ELD to hdmi-codec (get_eld),
+ refresh it after enable
+
+---
+ drivers/gpu/drm/bridge/ite-it61620.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/gpu/drm/bridge/ite-it61620.c b/drivers/gpu/drm/bridge/ite-it61620.c
+index ba8962ec6..f28d0d6e7 100644
+--- a/drivers/gpu/drm/bridge/ite-it61620.c
++++ b/drivers/gpu/drm/bridge/ite-it61620.c
+@@ -2720,7 +2720,25 @@ static int it61620_hdmi_audio_hook_plugged_cb(struct device *dev,
+ 	return 0;
+ }
+ 
++/* quigon: the monitor's ELD (name, audio formats) for ALSA, from the connector DRM parsed the EDID into */
++static int it61620_hdmi_get_eld(struct device *dev, void *data, u8 *buf, size_t len)
++{
++	struct it61620 *it61620 = dev_get_drvdata(dev);
++	struct drm_connector *connector = it61620->connector;
++
++	memset(buf, 0, len);
++	if (!connector)
++		return 0;
++
++	mutex_lock(&connector->eld_mutex);
++	memcpy(buf, connector->eld, min(sizeof(connector->eld), len));
++	mutex_unlock(&connector->eld_mutex);
++
++	return 0;
++}
++
+ static const struct hdmi_codec_ops it61620_audio_codec_ops = {
++	.get_eld = it61620_hdmi_get_eld,
+ 	.hw_params = it61620_hdmi_hw_params,
+ 	.audio_shutdown = it61620_hdmi_audio_shutdown,
+ 	.audio_startup = it61620_hdmi_audio_startup,
+@@ -3226,6 +3244,9 @@ static void it61620_bridge_atomic_enable(struct drm_bridge *bridge,
+ 	 */
+ 	it61620_check_audio(it61620);
+ 	it61620_hdmi_config_output(it61620, connector, mode);
++
++	/* quigon: the EDID is parsed by now: let hdmi-codec read the ELD again (the plug notice can come first) */
++	it61620_audio_update_connector_status(it61620);
+ }
+ 
+ static void it61620_bridge_atomic_disable(struct drm_bridge *bridge,
+@@ -3262,6 +3283,9 @@ static const struct drm_edid *it61620_bridge_edid_read(struct drm_bridge *bridge
+ 	struct it61620 *it61620 = bridge_to_it61620(bridge);
+ 	struct device *dev = it61620->dev;
+ 
++	/* quigon: the connector holds the ELD the audio side reads (it61620_hdmi_get_eld) */
++	it61620->connector = connector;
++
+ 	if (!it61620->cached_edid) {
+ 		it61620->cached_edid = drm_edid_read_custom(connector,
+ 							    it61620_get_edid_block,
+-- 
+2.43.0
+
