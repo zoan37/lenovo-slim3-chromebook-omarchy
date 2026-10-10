@@ -306,6 +306,19 @@
 	regulator-max-microvolt = <900000>;
 };
 
+/*
+ * Rails the bootloader leaves on that no Linux driver here claims: vproc2 (CPU DVFS is firmware-controlled, so cpufreq
+ * holds no regulator), vgpu11, vpu, vmodem, vrf12, va09, vsram_md. Kept on explicitly so the kernel can disable unused
+ * regulators (no regulator_ignore_unused); which of them are really needed on MT8189 is untested.
+ */
+&mt6359_vproc2_buck_reg { regulator-always-on; };
+&mt6359_vgpu11_buck_reg { regulator-always-on; };
+&mt6359_vpu_buck_reg { regulator-always-on; };
+&mt6359_vmodem_buck_reg { regulator-always-on; };
+&mt6359_vrf12_ldo_reg { regulator-always-on; };
+&mt6359_va09_ldo_reg { regulator-always-on; };
+&mt6359_vsram_md_ldo_reg { regulator-always-on; };
+
 &pmic {
 	/* ChromeOS skywalker: PMIC interrupt on GPIO 194 */
 	interrupts-extended = <&pio 194 IRQ_TYPE_LEVEL_HIGH>;

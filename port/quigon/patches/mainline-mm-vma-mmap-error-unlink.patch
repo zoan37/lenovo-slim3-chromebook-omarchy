@@ -1,0 +1,32 @@
+diff --git a/mm/vma.c b/mm/vma.c
+index dfa45c642..b619eaf74 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -2598,6 +2598,7 @@ static int __mmap_new_file_vma(struct mmap_state *map,
+ 			       struct vm_area_struct *vma)
+ {
+ 	struct vma_iterator *vmi = map->vmi;
++	struct file *file;
+ 	int error;
+ 
+ 	vma->vm_file = map->vm_file;
+@@ -2620,8 +2621,19 @@ static int __mmap_new_file_vma(struct mmap_state *map,
+ 			    map->prev, map->next);
+ 
+ 		vma_iter_set(vmi, vma->vm_end);
++		/*
++		 * The VMA isnt linked into the files rmap yet (vma_link_file()
++		 * comes after a successful ->mmap()), so free_pgtables() must not
++		 * unlink it: that would drop i_mmap_writable a second time, after
++		 * which every shared writable mmap of the file fails with -EPERM
++		 * (seen with ALSA PCM status mmaps, which return -ENXIO on arm64),
++		 * and erase a node that was never in the interval tree.
++		 */
++		file = vma->vm_file;
++		vma->vm_file = NULL;
+ 		/* Undo any partial mapping done by a device driver. */
+ 		unmap_region(&unmap);
++		vma->vm_file = file;
+ 		/* Only safe once unmapped. */
+ 		vma_close(vma);
+ 
