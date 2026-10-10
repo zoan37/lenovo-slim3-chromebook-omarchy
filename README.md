@@ -25,7 +25,7 @@ Experimental device port, not an installer.
 | Arch Linux ARM booting from USB on the ChromeOS kernel | **Works** (2026-10-08, first try): systemd `running`, no failed units, Wi-Fi + DHCP, SSH, bridge. [notes/usb-boot-20261008.md](notes/usb-boot-20261008.md) |
 | Input | Detected: Elan touchpad, cros_ec keyboard + buttons, tc3408 touchscreen, headset/HDMI/DP jacks |
 | Display (mediatek-drm KMS) | Hyprland drives eDP-1 at 1920×1200@60 |
-| Audio | **Works**: speaker, headphones, internal + headset mic via a UCM2 profile converted from ChromeOS's quigon config ([notes/input-audio-20261009.md](notes/input-audio-20261009.md)); HDMI audio on mainline; DP audio not yet |
+| Audio | **Works**: speaker, headphones, internal + headset mic via a UCM2 profile converted from ChromeOS's quigon config ([notes/input-audio-20261009.md](notes/input-audio-20261009.md)); HDMI and USB-C DisplayPort audio on mainline |
 | Keyboard top row | Fullscreen/overview/lock keys bound; brightness, volume, kbd backlight stock |
 | Touchpad palm rejection | ChromeOS's palm classifier ported as a uinput filter ([notes/touchpad-palm-20261009.md](notes/touchpad-palm-20261009.md)) |
 | Bluetooth, battery, suspend | BT works (scan); battery panel patched; s2idle suspend/resume passes the RTC-wake test |
@@ -64,7 +64,7 @@ Experimental device port, not an installer.
   + `xt_LOG`/`xt_recent`/`xt_multiport` (full ufw: logging, `limit`, port lists), `CONFIG_VT`/fbcon (boot console), maybe `CONFIG_HIBERNATION`. Sign with the devkeys like today's kernel.
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Mainline follow-ups: DP audio, PCIe L1.2 in s2idle
+- Mainline follow-up: PCIe L1.2 in s2idle
   ([list](notes/mainline-20261009.md#to-do-on-mainline)).
 - Syncthing folders; hardware video decode (MediaTek vcodec) for Chrome; re-sync script for ChromeOS kernel/modules/firmware/
   libmali after ChromeOS updates; backup image of the USB stick.
