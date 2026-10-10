@@ -163,7 +163,7 @@ check_session() {
   grep -q "hyprpm reload" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "hyprpm reload in autostart.lua" || fail "hyprpm reload missing from autostart.lua"
   grep -q "quigon-lid-watch" "$home/.config/hypr/autostart.lua" 2>/dev/null && pass "lid watcher in autostart.lua" || fail "quigon-lid-watch missing from autostart.lua: a lid close won't lock (port/quigon/user/hypr-autostart-quigon.lua)"
   if [[ $(uname -r) == *-quigon* ]]; then
-    grep -q "no_hardware_cursors = true" "$home/.config/hypr/hyprland.lua" 2>/dev/null && pass "software cursor on mainline (hyprland.lua)" || fail "software-cursor block missing from hyprland.lua: the pointer shows as white lines (port/quigon/user/hypr-hyprland-quigon.lua)"
+    grep -q "quigon/sw-cursor" "$home/.config/hypr/hyprland.lua" 2>/dev/null && pass "cursor block in hyprland.lua (hardware cursor; /etc/quigon/sw-cursor switches to software)" || fail "quigon cursor block missing from hyprland.lua (port/quigon/user/hypr-hyprland-quigon.lua)"
   fi
   local sig plugins
   sig=$(ls -t /run/user/$uid/hypr 2>/dev/null | head -1)
