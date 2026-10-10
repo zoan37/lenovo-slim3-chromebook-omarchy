@@ -1,10 +1,15 @@
 #!/bin/bash
-# quigon: Omarchy's clamshell, then switch the laptop panel back on if omarchy-system-lid-close switched it off and the
-# lid is open again (quigon-lid-watch runs this on lid open). Only then: the monitor watcher calls this too, and must not wake a panel the idle timer turned off.
-/usr/bin/omarchy-hyprland-monitor-clamshell "$@"
+# quigon: Omarchy's clamshell, then switch the laptop panel back on when the lid is open again. With --lid-open
+# (quigon-lid-watch, on a lid open) always, like any laptop, also when the lock screen's idle timer had blanked it
+# before the lid closed; without it (the monitor watcher calls this too) only if omarchy-system-lid-close blanked it.
+lid_open=0
+[[ ${1:-} == --lid-open ]] && { lid_open=1; shift; }
+o=/usr/share/omarchy/bin/omarchy-hyprland-monitor-clamshell; [[ -x $o ]] || o=/usr/bin/omarchy-hyprland-monitor-clamshell
+"$o" "$@"
 flag=${XDG_RUNTIME_DIR:-/tmp}/quigon-lid-blanked
-if [[ -e $flag ]] && ! omarchy-hw-laptop-closed; then
+if { (( lid_open )) || [[ -e $flag ]]; } && ! omarchy-hw-laptop-closed; then
   rm -f "$flag"
+  logger -t quigon-lid "lid-open: panel on"
   panel=$(omarchy-hyprland-monitor-laptop)
   [[ $panel =~ ^[A-Za-z0-9._-]+$ ]] &&
     hyprctl dispatch "hl.dsp.dpms({ action = \"enable\", monitor = \"$panel\" })" >/dev/null 2>&1

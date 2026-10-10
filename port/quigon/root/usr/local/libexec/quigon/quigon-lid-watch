@@ -14,7 +14,9 @@ import time
 import evdev
 from evdev import ecodes
 
-ACTIONS = {1: "omarchy-system-lid-close", 0: "omarchy-hyprland-monitor-clamshell"}
+# Absolute paths: Omarchy puts /usr/share/omarchy/bin first in PATH, which would bypass quigon's wrappers.
+ACTIONS = {1: ["/usr/local/bin/omarchy-system-lid-close"],
+           0: ["/usr/local/bin/omarchy-hyprland-monitor-clamshell", "--lid-open"]}
 
 
 def lid_device():
@@ -43,7 +45,7 @@ def main():
         try:
             for ev in dev.read_loop():
                 if ev.type == ecodes.EV_SW and ev.code == ecodes.SW_LID and ev.value in ACTIONS:
-                    subprocess.Popen([ACTIONS[ev.value]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    subprocess.Popen(ACTIONS[ev.value], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                      stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             time.sleep(2)  # device went away (driver reload): find it again

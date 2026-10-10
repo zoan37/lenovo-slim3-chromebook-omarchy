@@ -4,7 +4,8 @@
 # Run by quigon-lid-watch (Hyprland's lid bindings don't fire here); omarchy-hyprland-monitor-clamshell, run on lid
 # open, switches the panel back on.
 logger -t quigon-lid "lid-close ($*)"
-/usr/bin/omarchy-system-lid-close "$@"
+o=/usr/share/omarchy/bin/omarchy-system-lid-close; [[ -x $o ]] || o=/usr/bin/omarchy-system-lid-close
+"$o" "$@"
 if omarchy-hw-laptop-closed && ! omarchy-hw-external-monitors; then
   panel=$(omarchy-hyprland-monitor-laptop)
   if [[ $panel =~ ^[A-Za-z0-9._-]+$ ]]; then
