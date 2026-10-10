@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Hardware H.264 encoding for quigon: the VEN0 power domain, the venc clock controller (VEN1 gates), SMI larb7 and
+ * the stateful V4L2 encoder (firmware: the SCP's venc service, common firmware interface). Nodes from ChromeOS's
+ * mt8189.dtsi. Include after mt8189-quigon-vcodec.dtsi (SCP, MM_INFRA power domain, mm_iommu larbs).
+ */
+#include <dt-bindings/memory/mediatek,mt8189-memory-port.h>
+
+/ {
+	soc {
+		venc_gcon_clk: clock-controller@17000000 {
+			compatible = "mediatek,mt8189-venc";
+			reg = <0 0x17000000 0 0x1000>;
+			/* like vdec_core_clk: no power domain of its own, its users power VEN0 first */
+			#clock-cells = <1>;
+		};
+
+		smi_larb7: larb@17010000 {
+			compatible = "mediatek,mt8189-smi-larb";
+			reg = <0 0x17010000 0 0x1000>;
+			clocks = <&venc_gcon_clk CLK_VEN1_CKE0_LARB>,
+				 <&venc_gcon_clk CLK_VEN1_CKE0_LARB>;
+			clock-names = "apb", "smi";
+			power-domains = <&spm MT8189_POWER_DOMAIN_VEN0>;
+			mediatek,larb-id = <SMI_L7_ID>;
+			mediatek,smi = <&smi_disp_common>;
+		};
+
+		venc: video-codec@17020000 {
+			compatible = "mediatek,mt8189-vcodec-enc";
+			reg = <0 0x17020000 0 0x6000>;
+			interrupts = <GIC_SPI 494 IRQ_TYPE_LEVEL_HIGH 0>;
+			iommus = <&mm_iommu M4U_L7_P0_VENC_RCPU>,
+				 <&mm_iommu M4U_L7_P1_VENC_REC>,
+				 <&mm_iommu M4U_L7_P2_VENC_BSDMA>,
+				 <&mm_iommu M4U_L7_P3_VENC_SV_COMV>,
+				 <&mm_iommu M4U_L7_P4_VENC_RD_COMV>,
+				 <&mm_iommu M4U_L7_P8_VENC_SUB_W_LUMA>,
+				 <&mm_iommu M4U_L7_P10_VENC_CUR_LUMA>,
+				 <&mm_iommu M4U_L7_P11_VENC_CUR_CHROMA>,
+				 <&mm_iommu M4U_L7_P12_VENC_REF_LUMA>,
+				 <&mm_iommu M4U_L7_P13_VENC_REF_CHROMA>,
+				 <&mm_iommu M4U_L7_P14_VENC_SUB_R_LUMA>;
+			clocks = <&venc_gcon_clk CLK_VEN1_CKE1_VENC>;
+			clock-names = "venc_sel";
+			assigned-clocks = <&topckgen CLK_TOP_VENC_SEL>;
+			assigned-clock-parents = <&topckgen CLK_TOP_UNIVPLL_D4>;
+			power-domains = <&spm MT8189_POWER_DOMAIN_VEN0>;
+			mediatek,scp = <&scp>;
+		};
+	};
+};
+
+/* VEN0 under MM_INFRA, with ChromeOS's two clocks; "venc-0" (the larb7 gate) is a subsys clock, as vdec-0 */
+&{/soc/syscon@1c001000/power-controller/power-domain@MT8189_POWER_DOMAIN_MM_INFRA} {
+	power-domain@MT8189_POWER_DOMAIN_VEN0 {
+		reg = <MT8189_POWER_DOMAIN_VEN0>;
+		clocks = <&topckgen CLK_TOP_VENC_SEL>, <&venc_gcon_clk CLK_VEN1_CKE0_LARB>;
+		clock-names = "venc", "venc-0";
+		mediatek,infracfg = <&infra_ao>;
+		#power-domain-cells = <0>;
+	};
+};
+
+&mm_iommu {
+	mediatek,larbs = <&smi_larb0 &smi_larb1 &smi_larb4 &smi_larb7>;
+};

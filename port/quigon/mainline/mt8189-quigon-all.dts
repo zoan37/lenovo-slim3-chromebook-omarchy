@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
-/* Bring-up variant: everything (PCIe included) plus the display, the EC/input devices, USB, the IOMMU, thermal, audio, video decode, HDMI and USB-C DisplayPort, the GSC TPM. */
+/* Bring-up variant: everything (PCIe included) plus the display, the EC/input devices, USB, the IOMMU, thermal, audio, video decode, HDMI and USB-C DisplayPort, the GSC TPM, video encode. */
 #include "mt8189-quigon.dts"
 #include "mt8189-quigon-display.dtsi"
 #include "mt8189-quigon-input.dtsi"
@@ -12,3 +12,4 @@
 #include "mt8189-quigon-dp.dtsi"
 #include "mt8189-quigon-suspend.dtsi"
 #include "mt8189-quigon-tpm.dtsi"
+#include "mt8189-quigon-venc.dtsi"
