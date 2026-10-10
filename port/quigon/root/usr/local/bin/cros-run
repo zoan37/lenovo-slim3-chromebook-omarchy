@@ -1,0 +1,8 @@
+#!/bin/bash
+# cros-run <tool> [args]: run one of ChromeOS's own tools (gsctool, flashrom, futility, crossystem, ...) from ROOT-A
+# (/dev/sda3, mounted read-only on /mnt/cros), with ChromeOS's loader and libraries. Root only.
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+t=${1:?usage: cros-run <tool> [args]}; shift
+R=/mnt/cros; mkdir -p $R; mountpoint -q $R || mount -o ro /dev/sda3 $R || exit 1
+for d in usr/sbin usr/bin sbin bin; do [ -x "$R/$d/$t" ] && exec $R/lib64/ld-linux-aarch64.so.1 --library-path $R/lib64:$R/usr/lib64 "$R/$d/$t" "$@"; done
+echo "cros-run: $t not found on ChromeOS's ROOT-A"; exit 1

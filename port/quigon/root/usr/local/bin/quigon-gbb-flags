@@ -1,0 +1,72 @@
+#!/bin/bash
+# quigon-gbb-flags [flags]: set the firmware's GBB flags, guided. Default 0x9:
+#   0x1  DEV_SCREEN_SHORT_DELAY: the "OS verification is OFF" screen shows ~2 s instead of 30 s, no beep
+#   0x8  FORCE_DEV_SWITCH_ON:    developer mode stays on (a TPM wipe or a stray Space/Enter on that screen can't
+#                                switch it off, which would wipe ChromeOS's data and stop Omarchy from booting)
+# Needs CCD opened first (quigon-ccd-open). Uses ChromeOS's own gsctool/flashrom/futility from ROOT-A (mounted
+# read-only), run with ChromeOS's loader. Order: check CCD, back up the whole firmware, write-protect off, write the
+# flags, verify, write-protect back on. Asks before every step that changes something.
+set -uo pipefail
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+want=${1:-0x9}
+R=/mnt/cros
+mkdir -p $R
+mountpoint -q $R || mount -o ro /dev/sda3 $R || { echo "can't mount ChromeOS's ROOT-A (/dev/sda3)"; exit 1; }
+X() { $R/lib64/ld-linux-aarch64.so.1 --library-path $R/lib64:$R/usr/lib64 "$@"; }
+gsc() { X $R/usr/sbin/gsctool "$@"; }
+fr() { X $R/usr/sbin/flashrom -p internal "$@"; }
+fu() { X $R/usr/bin/futility "$@"; }
+step() { echo; echo "=== $*"; }
+ask() { read -r -p ">>> $1 [y/N] " a; [[ $a == [yY]* ]] || { echo "Stopped here. Nothing else was changed."; exit 1; }; }
+die() { echo "!!! $*"; echo "Stopped. Tell Claude what this says."; exit 1; }
+
+step "1/6 Checking the security chip (CCD must be Opened)"
+gsc -a -I 2>&1 | head -1
+gsc -a -I 2>&1 | grep -q "State: Opened" || die "CCD is not open (run quigon-ccd-open first)"
+
+step "2/6 Current GBB flags"
+cur=$(fu gbb --get --flash --flags 2>&1 | grep -o "0x[0-9a-fA-F]*" | tail -1)
+[ -n "$cur" ] || die "couldn't read the GBB flags"
+echo "now: $cur   wanted: $want"
+if (( cur == want )); then echo "Already set. Nothing to do."; exit 0; fi
+
+step "3/6 Backing up the whole firmware chip (read-only, nothing changes)"
+mkdir -p /root/firmware-backup
+bk=/root/firmware-backup/quigon-firmware-$(date +%Y%m%d-%H%M%S).bin
+fr -r "$bk" >/dev/null 2>&1 || die "firmware backup failed"
+sz=$(stat -c %s "$bk")
+(( sz == 8388608 )) || die "backup has the wrong size ($sz bytes, expected 8388608)"
+echo "saved $bk (8 MB, sha256 $(sha256sum "$bk" | cut -c1-16)...)"
+fr --wp-status 2>/dev/null | grep -i "range\|mode" | sed 's/^/was: /'
+
+step "4/6 Turning write-protect off (security chip override, then the flash chip's protection bits)"
+# Ti50 verifies the AP's RO firmware (GBB included) at every boot and refuses to drop WP unless an RO change is allowed
+# to boot: AllowUnverifiedRo must be Always first. Both gsctool steps want a few power-button presses ("PP").
+if ! gsc -a -I 2>&1 | grep -q "AllowUnverifiedRo.*Always"; then
+  ask "Allow booting with modified RO firmware (AllowUnverifiedRo: Always)? Press the power button when asked."
+  gsc -a -I AllowUnverifiedRo:always
+  gsc -a -I 2>&1 | grep -q "AllowUnverifiedRo.*Always" || die "AllowUnverifiedRo is not Always"
+fi
+ask "Turn write-protect off now? Press the power button when asked."
+gsc -a -w disable
+gsc -a -w 2>&1 | grep -q "forced disabled" || die "the security chip still has write-protect on"
+fr --wp-disable >/dev/null 2>&1 || die "flashrom couldn't clear the flash protection (is the chip's WP really off?)"
+fr --wp-status 2>/dev/null | grep -i "range\|mode"
+
+step "5/6 Writing GBB flags $want"
+ask "Write the GBB flags now ($cur -> $want)?"
+fu gbb --set --flash --flags="$want" 2>&1 | tail -2
+new=$(fu gbb --get --flash --flags 2>&1 | grep -o "0x[0-9a-fA-F]*" | tail -1)
+echo "read back: $new"
+(( new == want )) || die "the flags read back as $new, not $want (backup: $bk)"
+echo "GBB flags set."
+
+step "6/6 Turning write-protect back on"
+ask "Re-enable write-protect (recommended)?"
+fr --wp-range=0x0,0x400000 >/dev/null 2>&1 && fr --wp-enable >/dev/null 2>&1 || echo "(flash protection range: couldn't restore, tell Claude)"
+# the chip's WP comes back by itself at the next boot ("at boot: follow_batt_pres")
+gsc -a -w 2>&1 | tail -2
+fr --wp-status 2>/dev/null | grep -i "range\|mode"
+echo
+echo "Done. Next boot: the warning screen should last ~2 s with no beep."
+echo "Backup kept at $bk"

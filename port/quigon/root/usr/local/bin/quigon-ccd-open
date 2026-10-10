@@ -1,0 +1,11 @@
+#!/bin/bash
+# quigon: open the security chip's CCD from the laptop itself (gsctool -a -o from ChromeOS's ROOT-A, run with its
+# own loader). Follow the prompts: press the power button briefly each time it says so, for about 5 minutes.
+# Opening wipes the TPM and reboots the laptop.
+set -e
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+R=/mnt/cros; mkdir -p $R; mountpoint -q $R || mount -o ro /dev/sda3 $R
+G(){ $R/lib64/ld-linux-aarch64.so.1 --library-path $R/lib64:$R/usr/lib64 $R/usr/sbin/gsctool "$@"; }
+echo "CCD state before:"; G -a -I | head -1
+echo; echo ">>> Opening CCD. Press the POWER BUTTON briefly each time you are asked (ignore the Omarchy power menu)."; echo
+G -a -o

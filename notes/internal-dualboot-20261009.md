@@ -45,3 +45,22 @@ libs copied to `/opt/quigon-cros-tools` (`cgpt` needs only libuuid + glibc), so 
   them; Hyprland's children get llvmpipe), the launcher exports the llvmpipe variables for apps again, and Zink is opt-in
   per app with [`quigon-zink`](../port/quigon/root/usr/local/bin/quigon-zink). Crashed shells leave
   `/usr/bin/quickshell` crash-handler processes under `systemd --user`; `pkill -x quickshell` before restarting.
+
+## Short developer screen: GBB flags 0x9 (2026-10-09)
+
+The "OS verification is OFF" screen waited 30 s and beeped. GBB flags now `0x9`: `0x1` DEV_SCREEN_SHORT_DELAY (~2 s,
+no beep) and `0x8` FORCE_DEV_SWITCH_ON (developer mode can't be lost). Done from the laptop itself, no SuzyQ:
+
+1. [`quigon-ccd-open`](../port/quigon/root/usr/local/bin/quigon-ccd-open) (`gsctool -a -o`, ~5 min of power-button
+   presses). Ti50 ("NT"), CCD was Locked. **Opening wipes the TPM, and developer mode lives in the TPM**: the laptop
+   came back in normal mode (ChromeOS "Welcome", Omarchy's self-signed kernel refused). Fix: Esc+Refresh+Power, Ctrl+D,
+   re-enable developer mode (wipes ChromeOS's stateful again; ROOT-C untouched). 0x8 prevents this from now on.
+2. `gsctool -a -I AllowUnverifiedRo:always` (Ti50 verifies AP RO, GBB included, at every boot and won't drop WP
+   otherwise) and `gsctool -a -w disable`, each a few presses.
+3. `flashrom -p internal --wp-disable`, `futility gbb --set --flash --flags=0x9`, read back; a full re-read differs from
+   the backup in exactly one byte (GBB+0xc, the flags). Flash protection restored (`--wp-range=0x0,0x400000
+   --wp-enable`); the chip's WP is `follow_batt_pres` at boot. CCD stays open (for SuzyQ later).
+
+ChromeOS's own tools run from ROOT-A with [`cros-run`](../port/quigon/root/usr/local/bin/cros-run). Guided version:
+[`quigon-gbb-flags`](../port/quigon/root/usr/local/bin/quigon-gbb-flags). Firmware backups (before/after) are in
+`private/firmware/`.
