@@ -102,8 +102,10 @@ Day-to-day health check: `quigon-doctor`.
 - [ufw bug 2170467](https://bugs.launchpad.net/ufw/+bug/2170467): a failed `ufw reload` leaves the firewall disabled.
 - drm/mediatek mtk_crtc connector-route fixes, 3 patches ([lore](https://lore.kernel.org/all/20261011004248.1117649-1-agentzoan@gmail.com/)): the HDMI hotplug oops, an empty route
   slot in destroy, the route picked on every enable.
-- mtk_wdt: stop a watchdog left running by the bootloader across system sleep ([v1](https://lore.kernel.org/all/20261011004322.1118027-1-agentzoan@gmail.com/),
-  [v2](https://lore.kernel.org/all/20261011011536.1139162-1-agentzoan@gmail.com/): also stops the core's ping worker, after the Sashiko AI review).
+- mtk_wdt: stop a watchdog left running by the bootloader across system sleep ([v3](https://lore.kernel.org/all/20261011013631.1149228-1-agentzoan@gmail.com/);
+  [v1](https://lore.kernel.org/all/20261011004322.1118027-1-agentzoan@gmail.com/) and
+  [v2](https://lore.kernel.org/all/20261011011536.1139162-1-agentzoan@gmail.com/) went back and forth on the core's
+  ping worker after two Sashiko AI reviews; v3 keeps v1's code and explains why).
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do
