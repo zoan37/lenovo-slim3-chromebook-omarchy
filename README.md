@@ -100,12 +100,15 @@ Day-to-day health check: `quigon-doctor`.
 - [omacom/omarchy discussion #14945](https://github.com/omacom/omarchy/discussions/14945): Omarchy on this
   Chromebook, with the findings that look generic to Omarchy on ARM.
 - [ufw bug 2170467](https://bugs.launchpad.net/ufw/+bug/2170467): a failed `ufw reload` leaves the firewall disabled.
+- drm/mediatek mtk_crtc connector-route fixes, 3 patches ([lore](https://lore.kernel.org/all/20261011004248.1117649-1-agentzoan@gmail.com/)): the HDMI hotplug oops, an empty route
+  slot in destroy, the route picked on every enable.
+- mtk_wdt: stop a watchdog left running by the bootloader across system sleep ([lore](https://lore.kernel.org/all/20261011004322.1118027-1-agentzoan@gmail.com/)).
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do
 
-- Kernel updates: rebase the patches onto newer kernels as MT8189 support lands upstream; send the generic fixes
-  upstream (the mmap error-path fix, the MT6359 RTC year, the mediatek-drm CRTC route, the IT61620 audio format).
+- Kernel updates: rebase the patches onto newer kernels as MT8189 support lands upstream; send the remaining generic
+  fixes upstream (the IT61620 audio format; the MT6359 RTC year base was NAKed upstream in 2025, so it stays local).
 - Why PCIe L1.2 hangs s2idle on mainline (worked around: L1.2 only while awake).
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
