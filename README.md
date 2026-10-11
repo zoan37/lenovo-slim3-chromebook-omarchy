@@ -108,6 +108,8 @@ Day-to-day health check: `quigon-doctor`.
   [v1](https://lore.kernel.org/all/20261011004322.1118027-1-agentzoan@gmail.com/) and
   [v2](https://lore.kernel.org/all/20261011011536.1139162-1-agentzoan@gmail.com/) went back and forth on the core's
   ping worker after two Sashiko AI reviews; v3 keeps v1's code and explains why).
+- MT8189 clock driver: the GPU reference mux retuned MAINPLL (backlight flicker, buses off-spec); fix sent as a reply
+  to the clock series v6 ([lore](https://lore.kernel.org/all/20261011195612.1663714-1-agentzoan@gmail.com/)).
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do
