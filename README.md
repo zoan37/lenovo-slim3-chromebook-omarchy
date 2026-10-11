@@ -120,6 +120,10 @@ Day-to-day health check: `quigon-doctor`.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
 - Send the GPU clock fix upstream (`mainline-mt8189-gpu-mfgpll.patch`: `CLK_SET_RATE_NO_REPARENT` on
   `mfg_sel_mfgpll` in clk-mt8189-topckgen, plus the DT parent), like the other kernel fixes in `private/contrib/`.
+- Known cosmetic: when a Chrome window opens, a 1-px grey vertical line sits in the middle of its blank first frames
+  for 0.1–0.35 s ([`scanout-vline.sh`](scripts/scanout-vline.sh) captures it at x=962). Gone with `--disable-gpu`;
+  still there with `--disable-gpu-rasterization` and with `--use-angle=gles`, so it's in Chrome's GPU compositing on
+  Panfrost. Not chased further.
 - GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
   power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
 ## License
