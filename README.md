@@ -91,6 +91,9 @@ Day-to-day health check: `quigon-doctor`.
 - MT8189 video decoder/encoder v11 ([patchwork](https://patchwork.kernel.org/comment/26466141/)): test report
   (VP9 and encoder fine, Tested-by for the encoder; H.264 needs the VSI layout fix; HEVC advertised and crashes the
   SCP).
+- MT8189 suspend findings: s2idle idle state on the Genio 520/720-EVK DTS series
+  ([patchwork](https://patchwork.kernel.org/comment/27272335/)); MFG1 SMI regmap, DISP power-off, PCIe domains on
+  the MT8189 power-controller series ([patchwork](https://patchwork.kernel.org/comment/27272336/)).
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do
