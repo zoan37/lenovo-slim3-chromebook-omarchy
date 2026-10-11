@@ -94,6 +94,12 @@ Day-to-day health check: `quigon-doctor`.
 - MT8189 suspend findings: s2idle idle state on the Genio 520/720-EVK DTS series
   ([lore](https://lore.kernel.org/all/20261011000922.1089313-1-agentzoan@gmail.com/)); MFG1 SMI regmap, DISP power-off, PCIe domains on
   the MT8189 power-controller series ([lore](https://lore.kernel.org/all/20261011001123.1092269-1-agentzoan@gmail.com/)).
+- PCIe ASPM L1.2 hangs s2idle on MT8189: report and questions to the mediatek-gen3 maintainers (linux-pci).
+- [quickshell#1088](https://github.com/quickshell-mirror/quickshell/issues/1088#issuecomment-6103759271): a failing
+  PipeWire sink as another trigger of the audio-model crash.
+- [omacom/omarchy discussion #14945](https://github.com/omacom/omarchy/discussions/14945): Omarchy on this
+  Chromebook, with the findings that look generic to Omarchy on ARM.
+- [ufw bug 2170467](https://bugs.launchpad.net/ufw/+bug/2170467): a failed `ufw reload` leaves the firewall disabled.
 - The mm/vma mmap error-path fix carried here is already in later linux-next.
 
 ## To do

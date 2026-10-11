@@ -28,9 +28,9 @@
 set -euo pipefail
 V=26.2.4
 SHA256=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9   # same as Arch's PKGBUILD
-PREFIX=/opt/quigon-gpu/mesa-panfrost
+PREFIX=${PREFIX:-/opt/quigon-gpu/mesa-panfrost}
 here=$(cd "$(dirname "$0")" && pwd)
-PATCH=$here/../port/quigon/patches/mesa-panfrost-ro-vertex-ssbo.patch
+PATCH=${PATCH:-$here/../port/quigon/patches/mesa-panfrost-ro-vertex-ssbo.patch}
 WORK=${WORK:-/root/mesa-panfrost}
 OUT=${OUT:-$WORK/mesa-panfrost-$V-aarch64.tar.gz}
 JOBS=${JOBS:-$(nproc)}
