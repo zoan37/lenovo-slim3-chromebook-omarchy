@@ -13,4 +13,6 @@ elif [[ -n ${QUIGON_KERNEL_NOTIFY_TEST:-} ]]; then
 else
   exit 0
 fi
+# autostart runs before the shell serves notifications: wait for it, or the notification is lost
+omarchy-notification-wait 60 >/dev/null 2>&1 || true
 notify-send -u "$urgency" -a "Kernel" "$title" "$body"
