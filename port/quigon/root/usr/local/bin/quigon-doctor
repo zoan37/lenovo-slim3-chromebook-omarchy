@@ -95,6 +95,14 @@ check_system() {
     fi
     [[ -e /dev/tpm0 ]] && pass "GSC TPM (/dev/tpm0)" || fail "no /dev/tpm0 (Ti50 TPM, mt8189-quigon-tpm.dtsi / tpm_tis_i2c_cr50)"
     grep -qs "mtk-vcodec-enc" /sys/class/video4linux/video*/name && pass "hardware H.264 encoder" || fail "no mtk-vcodec-enc video device"
+    local mfg; mfg=$(cat /sys/kernel/debug/clk/mfg_sel_mfgpll/clk_parent 2>/dev/null)
+    if [[ -z $mfg ]]; then
+      :   # debugfs not mounted
+    elif [[ $mfg == mfgpll ]]; then
+      pass "GPU clock on MFGPLL (mainpll $(( $(cat /sys/kernel/debug/clk/mainpll/clk_rate) / 1000000 )) MHz, untouched by GPU DVFS)"
+    else
+      fail "GPU clock on $mfg: GPU DVFS can retune MAINPLL (backlight PWM flicker, buses off-spec); kernel without mainline-mt8189-gpu-mfgpll.patch?"
+    fi
     local wm; wm=$(ls -d /sys/fs/cgroup/user.slice/user-*.slice/user@*.service/session.slice/wayland-wm@*.service 2>/dev/null | head -1)
     if ! systemctl is-active -q quigon-uclamp; then
       fail "quigon-uclamp not running: UI bursts land on the slow A55 cores (systemctl enable --now quigon-uclamp)"
