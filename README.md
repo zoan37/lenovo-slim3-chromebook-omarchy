@@ -113,3 +113,10 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
+
+## License
+
+MIT ([LICENSE](LICENSE)) for this repo's scripts, configuration and notes. The patches in
+[`port/quigon/patches/`](port/quigon/patches) modify other projects and are under those projects' licenses (the
+kernel patches and device trees GPL-2.0, Mesa MIT, the others as their upstream). Firmware and ChromeOS binaries are
+not included.
