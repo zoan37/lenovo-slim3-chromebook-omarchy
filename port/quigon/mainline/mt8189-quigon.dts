@@ -145,13 +145,6 @@
 				     <GIC_SPI 269 IRQ_TYPE_LEVEL_HIGH 0>;
 			interrupt-names = "job", "mmu", "gpu";
 			clocks = <&mfgcfg CLK_MFG_BG3D>;
-			/*
-			 * Keep the GPU on its own PLL: through mfg_ref_sel the clock framework would otherwise retune MAINPLL
-			 * (mainpll_d6) for some GPU frequencies, which also moves every other mainpll-derived clock (the
-			 * backlight PWM among them: brief brightness flicker under GPU load).
-			 */
-			assigned-clocks = <&topckgen CLK_TOP_MFG_SEL_MFGPLL>;
-			assigned-clock-parents = <&apmixedsys CLK_APMIXED_MFGPLL>;
 			power-domains = <&spm MT8189_POWER_DOMAIN_MFG2>,
 					<&spm MT8189_POWER_DOMAIN_MFG3>;
 			power-domain-names = "core0", "core1";

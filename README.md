@@ -51,7 +51,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Wi-Fi, Bluetooth | MT7922 on PCIe (L1.2 while awake, dropped across s2idle where it hangs the SoC), Bluetooth; USB Wi-Fi dongle as backup |
 | Input | Keyboard (top row mapped), touchpad with ChromeOS's palm rejection ported ([notes](notes/touchpad-palm-20261009.md)), touchscreen, keyboard backlight |
 | Camera | UVC webcam (720p), works in Chrome |
-| Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def10 ([notes](notes/mainline-20261009.md)) |
+| Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def11 ([notes](notes/mainline-20261009.md)) |
 | Responsiveness | The desktop and the focused app run on the 2 fast cores (uclamp, as ChromeOS): short UI bursts 2.4× faster, no idle cost ([notes](notes/mainline-20261009.md)) |
 | Power | ~1.3–1.9 W idle on battery (screen dim, nothing plugged in), ~7 W under full load, 83 °C max |
 | Firewall | ufw |
@@ -118,8 +118,6 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Send the GPU clock fix upstream (`mainline-mt8189-gpu-mfgpll.patch`: `CLK_SET_RATE_NO_REPARENT` on
-  `mfg_sel_mfgpll` in clk-mt8189-topckgen, plus the DT parent), like the other kernel fixes in `private/contrib/`.
 - Known cosmetic: when a Chrome window opens, a 1-px grey vertical line sits in the middle of its blank first frames
   for 0.1–0.35 s ([`scanout-vline.sh`](scripts/scanout-vline.sh) captures it at x=962). Gone with `--disable-gpu`;
   still there with `--disable-gpu-rasterization` and with `--use-angle=gles`, so it's in Chrome's GPU compositing on

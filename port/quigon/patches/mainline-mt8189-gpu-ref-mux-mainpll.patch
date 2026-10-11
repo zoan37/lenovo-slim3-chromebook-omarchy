@@ -1,0 +1,69 @@
+From 1e9cd367883842817539af147a5f7146a74bc691 Mon Sep 17 00:00:00 2001
+From: zoan37 <agentzoan@gmail.com>
+Date: Sun, 11 Oct 2026 15:48:59 -0400
+Subject: [PATCH] clk: mediatek: mt8189: Don't let the GPU reference mux retune
+ MAINPLL
+
+mfg_sel_mfgpll selects the GPU clock from mfg_ref_sel or mfgpll and has
+CLK_SET_RATE_PARENT, so a GPU rate request (Panfrost devfreq) goes
+through __clk_mux_determine_rate(), which evaluates both parents.
+mfg_ref_sel is a MUX_GATE_CLR_SET_UPD() and so also has
+CLK_SET_RATE_PARENT, as does its mainpll_d6 parent: through it, any GPU
+OPP can be met exactly by retuning MAINPLL to six times the requested
+rate. mfg_ref_sel is parent 0, so it wins over mfgpll whenever both match.
+
+On an MT8189 Chromebook, MAINPLL therefore followed the GPU: 2340 MHz
+for the 390 MHz OPP instead of the 2184 MHz the firmware sets, and 3360
+or 3570 MHz while the GPU ran at 560 or 595 MHz. Everything else derived
+from MAINPLL moved with it: the peripheral and memory buses, and the
+display PWM, whose backlight frequency jumped from 2 to about 3 kHz for
+tens of milliseconds under GPU load. That showed as a visible brightness
+flicker.
+
+mfg_ref_sel is only the reference/bypass parent that the mux notifier
+switches to while MFGPLL relocks. Don't let it propagate rate changes,
+as MT8195 does for its top_mfg_core_tmp. The GPU then gets its rates
+from MFGPLL, and MAINPLL stays at its firmware rate.
+
+Assisted-by: LLM
+---
+Found on top of v6 ("[PATCH v6 19/27] clk: mediatek: Add MT8189 topckgen
+clock support"); it applies to that patch and can be squashed into it.
+
+Testing: Lenovo IdeaPad Slim 3 Chromebook (MT8189, "quigon"),
+next-20261008 plus this series and local board support, Panfrost on the
+Mali-G57 with devfreq. Before: MAINPLL 2340 MHz at idle and 3360/3570 MHz
+under GPU load, read from clk_summary; the display PWM's actual period
+(debugfs/pwm) went from 500 us to 348/328 us with it. After: every GPU
+OPP from 390 to 1100 MHz forced through devfreq min/max_freq, and
+scrolling a busy page: the GPU always on mfgpll, MAINPLL fixed at
+2184 MHz, the PWM steady, no flicker. No device tree change needed (the
+mux selects mfgpll by itself). Built with W=1.
+
+ drivers/clk/mediatek/clk-mt8189-topckgen.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/clk/mediatek/clk-mt8189-topckgen.c b/drivers/clk/mediatek/clk-mt8189-topckgen.c
+index 6ed7661119b8..ff9fd5115c5b 100644
+--- a/drivers/clk/mediatek/clk-mt8189-topckgen.c
++++ b/drivers/clk/mediatek/clk-mt8189-topckgen.c
+@@ -818,9 +818,13 @@ static const struct mtk_mux top_muxes[] = {
+ 			     dxcc_parents, 0x100, 0x104, 0x108,
+ 			     24, 2, 31, 0x0c, 1),
+ 	/* CLK_CFG_16 */
+-	MUX_GATE_CLR_SET_UPD(CLK_TOP_MFG_REF_SEL, "mfg_ref_sel",
+-			     mfg_ref_parents, 0x110, 0x114, 0x118,
+-			     0, 2, 7, 0x0c, 2),
++	/*
++	 * Reference/bypass parent of mfg_sel_mfgpll: don't propagate rate
++	 * requests, or GPU DVFS retunes MAINPLL through mainpll_d6.
++	 */
++	MUX_GATE_CLR_SET_UPD_FLAGS(CLK_TOP_MFG_REF_SEL, "mfg_ref_sel",
++				   mfg_ref_parents, 0x110, 0x114, 0x118,
++				   0, 2, 7, 0x0c, 2, 0),
+ 	MUX_GATE_CLR_SET_UPD(CLK_TOP_MDP0_SEL, "mdp0_sel",
+ 			     mmsys_parents, 0x110, 0x114, 0x118,
+ 			     8, 4, 15, 0x0c, 3),
+-- 
+2.43.0
+
