@@ -12,6 +12,8 @@ flags=()
 mainline=0
 # Extra environment for Chrome only (e.g. PAN_MESA_DEBUG=... while chasing a Panfrost bug): /etc/quigon/chrome.env
 if [[ -r /etc/quigon/chrome.env ]]; then set -a; . /etc/quigon/chrome.env; set +a; fi
+# QUIGON_CHROME_LOG=<file> in chrome.env: append Chrome's stderr there (e.g. with WAYLAND_DEBUG=1)
+[[ -n ${QUIGON_CHROME_LOG:-} ]] && exec 2>>"$QUIGON_CHROME_LOG"
 case "$(uname -r)" in *-quigon*) mainline=1 ;; esac
 
 if [[ -e /opt/quigon-gpu/va/v4l2_request_drv_video.so && ! -e /etc/quigon/no-video-decode ]]; then

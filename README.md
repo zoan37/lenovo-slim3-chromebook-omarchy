@@ -120,10 +120,12 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Known cosmetic: when a Chrome window opens, a 1-px grey vertical line sits in the middle of its blank first frames
-  for 0.1–0.35 s ([`scanout-vline.sh`](scripts/scanout-vline.sh) captures it at x=962). Gone with `--disable-gpu`;
-  still there with `--disable-gpu-rasterization` and with `--use-angle=gles`, so it's in Chrome's GPU compositing on
-  Panfrost. Not chased further.
+- Known cosmetic: picking a profile in Chrome's profile picker shows a 1-px grey vertical line mid-screen for
+  0.1–0.35 s. WAYLAND_DEBUG shows why: Chrome creates the browser window while the picker is still focused, so
+  Hyprland's dwindle predicts half of the picker's tile for the first configure (758×914, `predictSizeForNewTarget`);
+  Chrome draws that frame, the picker closes and the window gets the full tile (1512×910). The line is the half-width
+  frame's edge. Not a GPU bug (`--disable-gpu` only hid it by being slower). Avoided by unticking "Show on startup"
+  in the picker. Capture: [`scanout-vline.sh`](scripts/scanout-vline.sh).
 - GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
   power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
 ## License
