@@ -1,0 +1,97 @@
+From 0bc36efa4e0f5484c731e79082718b72b1ae778a Mon Sep 17 00:00:00 2001
+From: zoan37 <agentzoan@gmail.com>
+Date: Sat, 10 Oct 2026 20:11:57 -0400
+Subject: [PATCH] panfrost: add a driconf option to expose vertex shader SSBOs
+ on v9+
+
+Panfrost reports zero shader buffers for the vertex stage because
+memory writes from vertex shaders interact badly with IDVS and with
+the transform feedback lowering. That also blocks applications that
+only read SSBOs from the vertex stage, such as Ghostty's OpenGL
+renderer, which pulls per-cell data from a readonly std430 buffer.
+
+Loads are fine on v9+: the position and varying IDVS shaders can both
+execute them without observable effects, and SSBOs are accessed
+through bounds-checked buffer descriptors, so loads from speculatively
+shaded vertices cannot fault.
+
+Add a pan_vertex_ssbos option, off by default, that reports 16 shader
+buffers for the vertex stage on v9+. Stores and atomics are left as
+they are; their invocation count is implementation-defined, so the
+option is meant for applications that only read.
+
+Generated-by: Claude Code (Claude Opus 5.5)
+---
+ src/gallium/drivers/panfrost/driinfo_panfrost.h |  3 +++
+ src/gallium/drivers/panfrost/pan_screen.c       | 14 +++++++++++++-
+ src/gallium/drivers/panfrost/pan_screen.h       |  3 +++
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/panfrost/driinfo_panfrost.h b/src/gallium/drivers/panfrost/driinfo_panfrost.h
+index 1a4e8258e..093ddf287 100644
+--- a/src/gallium/drivers/panfrost/driinfo_panfrost.h
++++ b/src/gallium/drivers/panfrost/driinfo_panfrost.h
+@@ -26,4 +26,7 @@ DRI_CONF_SECTION_MISCELLANEOUS
+    DRI_CONF_PAN_COMPUTE_CORE_MASK(~0ull)
+    DRI_CONF_PAN_FRAGMENT_CORE_MASK(~0ull)
+    DRI_CONF_OPT_B(pan_relax_afbc_yuv_imports, false, "Use relaxed import rules for AFBC(YUV)")
++   DRI_CONF_OPT_B(pan_vertex_ssbos, false, "Expose shader storage buffers "
++                  "to vertex shaders on v9+. Vertex shader stores and atomics "
++                  "may be executed more than once per vertex")
+ DRI_CONF_SECTION_END
+diff --git a/src/gallium/drivers/panfrost/pan_screen.c b/src/gallium/drivers/panfrost/pan_screen.c
+index 1e2f2507e..7b2b2d038 100644
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -577,6 +577,16 @@ panfrost_init_shader_caps(struct panfrost_screen *screen)
+        */
+       bool allow_side_effects = (i != MESA_SHADER_VERTEX);
+ 
++      /* Vertex shader SSBOs are opt-in through driconf. On v9+ SSBOs are
++       * accessed through bounds-checked buffer descriptors, so loads from
++       * speculatively shaded vertices stay in bounds. Stores and atomics may
++       * run more than once per vertex, or for vertices that are not part of
++       * the draw, so this is only meant for applications that read SSBOs
++       * from the vertex stage.
++       */
++      bool allow_ssbos =
++         allow_side_effects || (screen->vertex_ssbos && dev->arch >= 9);
++
+       caps->max_instructions =
+       caps->max_alu_instructions =
+       caps->max_tex_instructions =
+@@ -607,7 +617,7 @@ panfrost_init_shader_caps(struct panfrost_screen *screen)
+       STATIC_ASSERT(PIPE_MAX_SHADER_SAMPLER_VIEWS < 0x10000);
+       caps->max_sampler_views = PIPE_MAX_SHADER_SAMPLER_VIEWS;
+       caps->supported_irs = (1 << PIPE_SHADER_IR_NIR);
+-      caps->max_shader_buffers = allow_side_effects ? 16 : 0;
++      caps->max_shader_buffers = allow_ssbos ? 16 : 0;
+       caps->max_shader_images = allow_side_effects ? PIPE_MAX_SHADER_IMAGES : 0;
+    }
+ }
+@@ -1072,6 +1082,8 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+ 
+    screen->afbc_tiled = driQueryOptionb(config->options, "pan_afbc_tiled");
+ 
++   screen->vertex_ssbos = driQueryOptionb(config->options, "pan_vertex_ssbos");
++
+    screen->force_afbc_packing = dev->debug & PAN_DBG_FORCE_PACK;
+    if (!screen->force_afbc_packing)
+       screen->force_afbc_packing = driQueryOptionb(config->options,
+diff --git a/src/gallium/drivers/panfrost/pan_screen.h b/src/gallium/drivers/panfrost/pan_screen.h
+index b04c607d9..9999789d6 100644
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -146,6 +146,9 @@ struct panfrost_screen {
+    /* Use AFBC tiled layout whenever possible */
+    bool afbc_tiled;
+ 
++   /* Expose SSBOs to vertex shaders (v9+) */
++   bool vertex_ssbos;
++
+    /* Pack AFBC textures progressively in the background */
+    bool force_afbc_packing;
+ 
+-- 
+2.55.0
+
