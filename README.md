@@ -1,7 +1,7 @@
 # Omarchy on Lenovo IdeaPad Slim 3 Chromebook (Kompanio 540)
 
 Native Arch Linux ARM and Omarchy on the 2026 **Lenovo IdeaPad Slim 3 Chromebook** (model label 14M891x):
-MediaTek Kompanio 540 (**MT8189**, 4× Cortex-A78 + 4× A55), Mali-G57 MC2, 8 GB LPDDR5X, 128 GB UFS,
+MediaTek Kompanio 540 (**MT8189**, 2× Cortex-A78 at 2.6 GHz + 6× A55 at 2.0 GHz), Mali-G57 MC2, 8 GB LPDDR5X, 128 GB UFS,
 1920×1200 eDP. ChromeOS board `skywalker`, variant **quigon**, which boots the `google,obiwan` device tree.
 
 There is no UEFI firmware (MrChromebox) for MediaTek Chromebooks, so everything boots through ChromeOS's own
