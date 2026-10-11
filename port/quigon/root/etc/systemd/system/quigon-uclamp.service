@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep the desktop on the fast cores (uclamp, as ChromeOS): Hyprland's session and the focused app
+
+[Service]
+ExecStart=/usr/local/libexec/quigon/uclamp-boost
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -51,6 +51,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Wi-Fi, Bluetooth | MT7922 on PCIe (L1.2 while awake, dropped across s2idle where it hangs the SoC), Bluetooth; USB Wi-Fi dongle as backup |
 | Input | Keyboard (top row mapped), touchpad with ChromeOS's palm rejection ported ([notes](notes/touchpad-palm-20261009.md)), touchscreen, keyboard backlight |
 | Camera | UVC webcam (720p), works in Chrome |
+| Responsiveness | The desktop and the focused app run on the 2 fast cores (uclamp, as ChromeOS): short UI bursts 2.4× faster, no idle cost ([notes](notes/mainline-20261009.md)) |
 | Power | ~1.3–1.9 W idle on battery (screen dim, nothing plugged in), ~7 W under full load, 83 °C max |
 | Firewall | ufw |
 | Debug | SuzyQ (home-made): GSC/AP/EC consoles, kernel log on the AP UART, CCD open, remote reset ([notes](notes/suzyq-20261010.md)) |

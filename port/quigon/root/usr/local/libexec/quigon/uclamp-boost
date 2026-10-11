@@ -1,0 +1,121 @@
+#!/usr/bin/python3 -I
+# uclamp-boost: keep the desktop on the fast cores, as ChromeOS does with uclamp.
+# MT8189 has 2 Cortex-A78 (capacity 1024) and 6 A55 (capacity 216). EAS puts short UI bursts (compositor, shell, the
+# app being used) on an A55 at a low clock and only migrates them once they've been busy for a while, which is what
+# makes taps and scrolling feel slow. A minimum utilization clamp (cgroup cpu.uclamp.min) above the A55 capacity makes
+# the scheduler place those tasks on an A78 and schedutil run it at a matching clock while they run; idle costs
+# nothing. Applied to:
+#   - Hyprland's own service cgroup (Hyprland, Xwayland, the Quickshell bar): SHELL_MIN, all the time
+#   - the cgroup (app-*.scope / app-*.service) of the focused window: APP_MIN, moved on every focus change
+# The parent slices get cpu.uclamp.min=max so they allow it (a cgroup's effective clamp is capped by its parent's).
+# Needs CONFIG_UCLAMP_TASK_GROUP and the cpu controller on the app/session slices (the CPUWeight drop-ins in
+# /etc/systemd/user). Follows Hyprland's event socket (activewindowv2) and reconnects when the session restarts.
+import glob
+import json
+import os
+import socket
+import sys
+import time
+
+SHELL_MIN = "50"   # percent of the biggest CPU's capacity: ~512/1024, above the A55's 216
+APP_MIN = "40"     # ~410/1024: still only fits an A78; schedutil floor ~1.3 GHz while the app runs
+CG = "/sys/fs/cgroup"
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def write(cg, value):
+    try:
+        with open(os.path.join(cg, "cpu.uclamp.min"), "w") as f:
+            f.write(value)
+        return True
+    except OSError:
+        return False
+
+
+def cgroup_of(pid):
+    try:
+        with open(f"/proc/{pid}/cgroup") as f:
+            for line in f:
+                if line.startswith("0::"):
+                    return CG + line[3:].strip()
+    except OSError:
+        pass
+    return None
+
+
+def request(sock_dir, cmd):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(2)
+    try:
+        s.connect(os.path.join(sock_dir, ".socket.sock"))
+        s.sendall(cmd.encode())
+        data = b""
+        while chunk := s.recv(65536):
+            data += chunk
+        return json.loads(data or b"{}")
+    except (OSError, ValueError):
+        return {}
+    finally:
+        s.close()
+
+
+def session(sock_dir):
+    uid = os.stat(sock_dir).st_uid
+    user = f"{CG}/user.slice/user-{uid}.slice/user@{uid}.service"
+    for d in (f"{CG}/user.slice", f"{CG}/user.slice/user-{uid}.slice", user, f"{user}/app.slice", f"{user}/session.slice"):
+        write(d, "max")
+    try:
+        hypr_pid = int(open(os.path.join(sock_dir, "hyprland.lock")).readline())
+    except (OSError, ValueError):
+        hypr_pid = None
+    shell = cgroup_of(hypr_pid) if hypr_pid else None
+    if shell and write(shell, SHELL_MIN):
+        log(f"shell {shell.rsplit('/', 1)[-1]}: uclamp.min {SHELL_MIN}%")
+    elif shell:
+        log(f"no cpu.uclamp.min in {shell} (kernel without UCLAMP_TASK_GROUP, or no cpu controller there)")
+
+    boosted = None
+
+    def focus():
+        nonlocal boosted
+        pid = request(sock_dir, "j/activewindow").get("pid")
+        cg = cgroup_of(pid) if pid else None
+        if cg and not cg.startswith(f"{user}/app.slice/"):
+            cg = None            # the shell's own cgroup is boosted already; leave other slices alone
+        if cg == boosted:
+            return
+        if boosted:
+            write(boosted, "0")
+        if cg:
+            # nested slices on the way (uwsm's app-graphical.slice) must allow it too
+            d = os.path.dirname(cg)
+            while len(d) > len(f"{user}/app.slice"):
+                write(d, "max")
+                d = os.path.dirname(d)
+        boosted = cg if cg and write(cg, APP_MIN) else None
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(os.path.join(sock_dir, ".socket2.sock"))
+    focus()
+    buf = b""
+    with s:
+        while chunk := s.recv(4096):
+            buf += chunk
+            *lines, buf = buf.split(b"\n")
+            if any(line.startswith(b"activewindowv2>>") for line in lines):
+                focus()
+    if boosted:
+        write(boosted, "0")
+
+
+while True:
+    socks = sorted(glob.glob("/run/user/*/hypr/*/.socket2.sock"), key=os.path.getmtime)
+    if socks:
+        try:
+            session(os.path.dirname(socks[-1]))
+        except OSError as e:
+            log(f"session ended: {e}")
+    time.sleep(3)
