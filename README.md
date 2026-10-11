@@ -118,6 +118,10 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
+- Send the GPU clock fix upstream (`mainline-mt8189-gpu-mfgpll.patch`: `CLK_SET_RATE_NO_REPARENT` on
+  `mfg_sel_mfgpll` in clk-mt8189-topckgen, plus the DT parent), like the other kernel fixes in `private/contrib/`.
+- GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
+  power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
 ## License
 
 MIT ([LICENSE](LICENSE)) for this repo's scripts, configuration and notes. The patches in
