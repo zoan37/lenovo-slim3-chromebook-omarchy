@@ -1,0 +1,25 @@
+From 3d29d5cc3013b457258944471b4d89ab14aec2b4 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sat, 10 Oct 2026 21:05:22 -0400
+Subject: [PATCH] watchdog: mtk_wdt: stop the core ping worker over system
+ sleep (watchdog_stop_ping_on_suspend), as in the v2 upstream patch
+
+---
+ drivers/watchdog/mtk_wdt.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/watchdog/mtk_wdt.c b/drivers/watchdog/mtk_wdt.c
+index 930390bea84f..ecdce335bf28 100644
+--- a/drivers/watchdog/mtk_wdt.c
++++ b/drivers/watchdog/mtk_wdt.c
+@@ -557,6 +557,7 @@ static int mtk_wdt_probe(struct platform_device *pdev)
+ 	mtk_wdt_init(&mtk_wdt->wdt_dev);
+ 
+ 	watchdog_stop_on_reboot(&mtk_wdt->wdt_dev);
++	watchdog_stop_ping_on_suspend(&mtk_wdt->wdt_dev);
+ 	err = devm_watchdog_register_device(dev, &mtk_wdt->wdt_dev);
+ 	if (unlikely(err))
+ 		return err;
+-- 
+2.43.0
+
