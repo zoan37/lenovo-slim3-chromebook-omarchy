@@ -117,6 +117,9 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
+- Known cosmetic: scrolling x.com briefly dims the white background in Chrome. Only with GPU compositing
+  (not with `--disable-gpu`); not video decode, GPU raster, window alpha or the panel (no dynamic backlight). Probably
+  X's backdrop blur on Panfrost; untested.
 
 ## License
 
