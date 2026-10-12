@@ -50,7 +50,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Video | H.264/VP9 hardware decode in Chrome (bit-exact), H.264 encode for ffmpeg/GStreamer; no HEVC (the single-core decoder interface isn't implemented, ChromeOS's kernel included) |
 | Wi-Fi, Bluetooth | MT7922 on PCIe (L1.2 while awake, dropped across s2idle where it hangs the SoC), Bluetooth; USB Wi-Fi dongle as backup |
 | Input | Keyboard (top row mapped), touchpad with ChromeOS's palm rejection ported ([notes](notes/touchpad-palm-20261009.md)), touchscreen, keyboard backlight |
-| Screen recording | Omarchy's recorder (Super+Alt+Print and the capture menu) through a `gpu-screen-recorder` stand-in: wf-recorder into the hardware H.264 encoder, 30 fps, full screen or region, desktop/mic audio ([notes](notes/mainline-20261009.md)) |
+| Screen recording | Omarchy's recorder (Alt+Print, or the capture menu) through a `gpu-screen-recorder` stand-in: wf-recorder into the hardware H.264 encoder, 30 fps, full screen or region, desktop/mic audio ([notes](notes/mainline-20261009.md)) |
 | Camera | UVC webcam (720p), works in Chrome |
 | Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def11 ([notes](notes/mainline-20261009.md)) |
 | Responsiveness | The desktop and the focused app run on the 2 fast cores (uclamp, as ChromeOS): short UI bursts 2.4× faster, no idle cost ([notes](notes/mainline-20261009.md)) |
