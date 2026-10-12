@@ -127,7 +127,6 @@ Day-to-day health check: `quigon-doctor`.
   Chrome draws that frame, the picker closes and the window gets the full tile (1512×910). The line is the half-width
   frame's edge. Not a GPU bug (`--disable-gpu` only hid it by being slower). Avoided by unticking "Show on startup"
   in the picker. Capture: [`scanout-vline.sh`](scripts/scanout-vline.sh).
-- Send the encoder visible-size fix upstream (`mainline-venc-visible-size.patch`, mtk_vcodec_enc S_FMT(OUTPUT)).
 - GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
   power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
 ## License
