@@ -8,6 +8,8 @@
 # ghostty-gpu-preload.so adds dmabuf,offload to Ghostty's GDK_DISABLE and strips these variables from what Ghostty
 # execs. Otherwise (GPU mode off) Ghostty runs unchanged.
 Z=/opt/quigon-gpu/mesa-zink P=/opt/quigon-gpu/mesa-panfrost
+# Extra environment for Ghostty only (e.g. GSK_RENDERER while chasing a GTK drawing bug): /etc/quigon/ghostty.env
+if [[ -r /etc/quigon/ghostty.env ]]; then set -a; . /etc/quigon/ghostty.env; set +a; fi
 gpu() {
   unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER GBM_ALWAYS_SOFTWARE
   export __EGL_VENDOR_LIBRARY_FILENAMES=$1/share/glvnd/egl_vendor.d/50_mesa.json
@@ -18,6 +20,9 @@ gpu() {
 if [[ $(uname -r) == *-quigon* ]]; then
   if [[ -e $P/lib/libgallium-26.2.4.so ]]; then
     gpu $P; export PAN_RO_VERTEX_SSBO=1
+    # GTK's GPU renderer (on this forced desktop GL 4.3 context) drops the titles of all but one tab in the tab bar;
+    # the cairo renderer draws GTK's own widgets correctly, and the terminal itself still renders on the GPU.
+    export GSK_RENDERER=${GSK_RENDERER:-cairo}
   else
     export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
   fi
