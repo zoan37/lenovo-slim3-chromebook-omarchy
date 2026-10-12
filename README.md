@@ -54,6 +54,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Screen recording | Omarchy's recorder (Alt+Print, or the capture menu) through a `gpu-screen-recorder` stand-in: wf-recorder into the hardware H.264 encoder, 30 fps, full screen or region, desktop/mic audio ([notes](notes/mainline-20261009.md)) |
 | Camera | UVC webcam (720p), works in Chrome |
 | Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def11 ([notes](notes/mainline-20261009.md)) |
+| GPU clocking | 526 MHz floor and 20 ms polling for Panfrost's DVFS (it sawtoothed 390 ↔ 1100 MHz): much smoother animation and scrolling ([notes](notes/mainline-20261009.md)) |
 | Responsiveness | The desktop and the focused app run on the 2 fast cores (uclamp, as ChromeOS): short UI bursts 2.4× faster, no idle cost ([notes](notes/mainline-20261009.md)) |
 | Power | ~1.3–1.9 W idle on battery (screen dim, nothing plugged in), ~7 W under full load, 83 °C max |
 | Firewall | ufw |
@@ -122,11 +123,3 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
-  power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
-## License
-
-MIT ([LICENSE](LICENSE)) for this repo's scripts, configuration and notes. The patches in
-[`port/quigon/patches/`](port/quigon/patches) modify other projects and are under those projects' licenses (the
-kernel patches and device trees GPL-2.0, Mesa MIT, the others as their upstream). Firmware and ChromeOS binaries are
-not included.

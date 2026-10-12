@@ -95,6 +95,12 @@ check_system() {
     fi
     [[ -e /dev/tpm0 ]] && pass "GSC TPM (/dev/tpm0)" || fail "no /dev/tpm0 (Ti50 TPM, mt8189-quigon-tpm.dtsi / tpm_tis_i2c_cr50)"
     grep -qs "mtk-vcodec-enc" /sys/class/video4linux/video*/name && pass "hardware H.264 encoder" || fail "no mtk-vcodec-enc video device"
+    local gd=/sys/class/devfreq/13000000.gpu
+    if [[ -r $gd/min_freq ]]; then
+      [[ $(cat $gd/min_freq) == 526000000 && $(cat $gd/polling_interval) == 20 ]] \
+        && pass "GPU DVFS: 526 MHz floor, 20 ms polling (no 390/1100 sawtooth)" \
+        || fail "GPU DVFS at stock ($(( $(cat $gd/min_freq) / 1000000 )) MHz, $(cat $gd/polling_interval) ms): 70-quigon-gpu-devfreq.rules not applied"
+    fi
     local mfg; mfg=$(cat /sys/kernel/debug/clk/mfg_sel_mfgpll/clk_parent 2>/dev/null)
     if [[ -z $mfg ]]; then
       :   # debugfs not mounted

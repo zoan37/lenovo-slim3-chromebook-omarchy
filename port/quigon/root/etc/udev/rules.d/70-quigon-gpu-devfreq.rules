@@ -1,0 +1,5 @@
+# Panfrost's simple_ondemand (upthreshold 45%) sawtoothed 390 -> 1100 -> 390 MHz about 4 times a second under light,
+# bursty load (scrolling, window animations), so bursts often started at the lowest clock and frames slipped.
+# A 526 MHz floor and 20 ms polling (one frame instead of three): much smoother; no idle cost (the GPU powers down
+# when there is nothing to draw, whatever its floor). Stock: min_freq 390000000, polling_interval 50.
+ACTION=="add|change", SUBSYSTEM=="devfreq", KERNEL=="13000000.gpu", ATTR{polling_interval}="20", ATTR{min_freq}="526000000"
