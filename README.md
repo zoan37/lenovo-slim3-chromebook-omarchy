@@ -50,6 +50,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Video | H.264/VP9 hardware decode in Chrome (bit-exact), H.264 encode for ffmpeg/GStreamer; no HEVC (the single-core decoder interface isn't implemented, ChromeOS's kernel included) |
 | Wi-Fi, Bluetooth | MT7922 on PCIe (L1.2 while awake, dropped across s2idle where it hangs the SoC), Bluetooth; USB Wi-Fi dongle as backup |
 | Input | Keyboard (top row mapped), touchpad with ChromeOS's palm rejection ported ([notes](notes/touchpad-palm-20261009.md)), touchscreen, keyboard backlight |
+| Hyprland | Omarchy's 0.56.2 plus [`quigon-map-size-hold.patch`](port/quigon/pkgbuilds/hyprland) (pinned, rebuilt with [`build-hyprland.sh`](scripts/build-hyprland.sh)): new windows no longer flash a wrong-size first frame (the line mid-screen after Chrome's profile picker) |
 | Screen recording | Omarchy's recorder (Alt+Print, or the capture menu) through a `gpu-screen-recorder` stand-in: wf-recorder into the hardware H.264 encoder, 30 fps, full screen or region, desktop/mic audio ([notes](notes/mainline-20261009.md)) |
 | Camera | UVC webcam (720p), works in Chrome |
 | Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def11 ([notes](notes/mainline-20261009.md)) |
@@ -121,12 +122,6 @@ Day-to-day health check: `quigon-doctor`.
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
 - Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
-- Known cosmetic: picking a profile in Chrome's profile picker shows a 1-px grey vertical line mid-screen for
-  0.1–0.35 s. WAYLAND_DEBUG shows why: Chrome creates the browser window while the picker is still focused, so
-  Hyprland's dwindle predicts half of the picker's tile for the first configure (758×914, `predictSizeForNewTarget`);
-  Chrome draws that frame, the picker closes and the window gets the full tile (1512×910). The line is the half-width
-  frame's edge. Not a GPU bug (`--disable-gpu` only hid it by being slower). Avoided by unticking "Show on startup"
-  in the picker. Capture: [`scanout-vline.sh`](scripts/scanout-vline.sh).
 - GPU DVFS tuning: Panfrost's `simple_ondemand` ping-pongs 390 MHz ↔ 1.1 GHz every ~75 ms under light load (wasted
   power, possible micro-stutter); try the governor's up/down thresholds and polling interval.
 ## License

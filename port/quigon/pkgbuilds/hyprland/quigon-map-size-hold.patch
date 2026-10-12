@@ -1,0 +1,83 @@
+diff --git i/src/desktop/view/Window.cpp w/src/desktop/view/Window.cpp
+index 8836f73..13c2e74 100644
+--- i/src/desktop/view/Window.cpp
++++ w/src/desktop/view/Window.cpp
+@@ -2074,6 +2074,7 @@ void CWindow::mapWindow() {
+     m_monitor       = PMONITOR;
+     m_workspace     = PWORKSPACE;
+     m_isMapped      = true;
++    m_mappedAt      = Time::steadyNow();
+     m_animatingIn   = true;
+     m_title         = fetchTitle();
+     m_firstMap      = true;
+@@ -2709,6 +2710,23 @@ void CWindow::unmapWindow() {
+ 
+     // update lastwindow after focus
+     onUnmap();
++
++    // A toplevel that has been configured but isn't mapped yet got the layout's size prediction in its first
++    // configure, and that prediction may have depended on this window (dwindle predicts half of the focused window's
++    // tile). Re-send it, so the client draws its first frame for the layout it will actually get. Chrome's profile
++    // picker -> browser window: the browser window was configured for half the picker's tile, drew that after the
++    // picker had closed, and showed the stale half-width content (a line mid-window) until it re-rendered.
++    for (auto const& w : Desktop::windowState()->windows()) {
++        if (w == m_self.lock() || w->m_isMapped || w->m_isX11 || !w->m_xdgSurface || !w->m_xdgSurface->m_toplevel || w->m_xdgSurface->m_initialCommit)
++            continue;
++        if (w->m_ruleApplicator->static_.floating.value_or(false) || w->m_isFloating || w->parent() || g_pXWaylandManager->shouldBeFloated(w, true))
++            continue;
++        const auto PRED = g_layoutManager->predictSizeForNewTiledTarget().value_or(Vector2D{});
++        if (PRED.x > 0 && PRED.y > 0) {
++            Log::logger->log(Log::DEBUG, "Layout re-predicts size {} for unmapped {}", PRED, w);
++            w->m_xdgSurface->m_toplevel->setSize(PRED);
++        }
++    }
+ }
+ 
+ void CWindow::commitWindow() {
+diff --git i/src/desktop/view/Window.hpp w/src/desktop/view/Window.hpp
+index 94681cc..5d138b6 100644
+--- i/src/desktop/view/Window.hpp
++++ w/src/desktop/view/Window.hpp
+@@ -21,6 +21,7 @@
+ #include "../Workspace.hpp"
+ #include "../rule/windowRule/WindowRuleApplicator.hpp"
+ #include "../../protocols/types/ContentType.hpp"
++#include "../../helpers/time/Time.hpp"
+ #include "../../render/Framebuffer.hpp"
+ #include "types/GeometricMovableAnimated.hpp"
+ #include "types/AlphaModifiable.hpp"
+@@ -153,6 +154,7 @@ namespace Desktop::View {
+         Vector2D                                     m_pendingReportedSize;
+         std::optional<std::pair<uint32_t, Vector2D>> m_pendingSizeAck;
+         std::vector<std::pair<uint32_t, Vector2D>>   m_pendingSizeAcks;
++        Time::steady_tp                              m_mappedAt; // when it was last mapped, see shouldRenderWindow
+ 
+         // for floating window offset in workspace animations
+         Vector2D m_floatingOffset = Vector2D(0, 0);
+diff --git i/src/render/Renderer.cpp w/src/render/Renderer.cpp
+index 249f084..f9e9f24 100644
+--- i/src/render/Renderer.cpp
++++ w/src/render/Renderer.cpp
+@@ -231,6 +231,22 @@ bool IHyprRenderer::shouldRenderWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor) {
+     if (!pWindow->visibleOnMonitor(pMonitor))
+         return false;
+ 
++    // A window can map with a frame drawn for another size: its first configure carried the layout's prediction
++    // (e.g. half of the focused window's tile in dwindle), and the layout changed before it mapped (that window
++    // closed). Drawing that frame shows a wrong-size window until the client redraws at its real size. For up to
++    // 1 s after mapping (Chrome takes 140-290 ms on MT8189, longer on a cold start), hold back an xdg toplevel whose
++    // committed geometry is off by more than 10%.
++    if (pWindow->m_isMapped && !pWindow->m_isX11 && pWindow->m_xdgSurface && pWindow->m_xdgSurface->m_toplevel &&
++        Time::steadyNow() - pWindow->m_mappedAt < std::chrono::milliseconds(1000)) {
++        const auto WANT = pWindow->realToReportSize();
++        const auto HAVE = pWindow->m_xdgSurface->m_current.geometry.size();
++        if (WANT.x > 0 && WANT.y > 0 && HAVE.x > 0 && HAVE.y > 0 &&
++            (std::abs(WANT.x - HAVE.x) > WANT.x * 0.1 || std::abs(WANT.y - HAVE.y) > WANT.y * 0.1)) {
++            pMonitor->scheduleFrame();
++            return false;
++        }
++    }
++
+     if (!pWindow->m_workspace)
+         return false;
+ 
