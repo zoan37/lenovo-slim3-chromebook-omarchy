@@ -7,18 +7,27 @@
 # nothing. Applied to:
 #   - Hyprland's own service cgroup (Hyprland, Xwayland, the Quickshell bar): SHELL_MIN, all the time
 #   - the cgroup (app-*.scope / app-*.service) of the focused window: APP_MIN, moved on every focus change
+#   - a newly created app cgroup, for its first LAUNCH_S seconds (launch boost, as ChromeOS boosts app launches):
+#     an app starts before its window exists, so the focus boost alone left its startup on the A55s
+#   - the user's systemd manager, uwsm's app daemon and the D-Bus broker: APP_MIN, all the time. Every launch goes
+#     through them (uwsm-app asks systemd for a scope; single-instance apps are activated over D-Bus) and they are
+#     idle otherwise; uwsm-app's round trip went from ~85 to ~50 ms
 # The parent slices get cpu.uclamp.min=max so they allow it (a cgroup's effective clamp is capped by its parent's).
 # Needs CONFIG_UCLAMP_TASK_GROUP and the cpu controller on the app/session slices (the CPUWeight drop-ins in
 # /etc/systemd/user). Follows Hyprland's event socket (activewindowv2) and reconnects when the session restarts.
+import ctypes
 import glob
 import json
 import os
+import select
 import socket
+import struct
 import sys
 import time
 
 SHELL_MIN = "50"   # percent of the biggest CPU's capacity: ~512/1024, above the A55's 216
 APP_MIN = "40"     # ~410/1024: still only fits an A78; schedutil floor ~1.3 GHz while the app runs
+LAUNCH_S = 3.0     # launch boost length (or until the app is focused)
 CG = "/sys/fs/cgroup"
 
 
@@ -76,6 +85,9 @@ def session(sock_dir):
         log(f"shell {shell.rsplit('/', 1)[-1]}: uclamp.min {SHELL_MIN}%")
     elif shell:
         log(f"no cpu.uclamp.min in {shell} (kernel without UCLAMP_TASK_GROUP, or no cpu controller there)")
+    for d in (f"{user}/init.scope", f"{user}/session.slice/wayland-wm-app-daemon.service",
+              f"{user}/session.slice/dbus-broker.service"):
+        write(d, APP_MIN)
 
     boosted = None
 
@@ -97,16 +109,71 @@ def session(sock_dir):
                 d = os.path.dirname(d)
         boosted = cg if cg and write(cg, APP_MIN) else None
 
+    # launch boost: inotify on the slices uwsm-app creates app scopes/services in
+    libc = ctypes.CDLL(None, use_errno=True)
+    ino = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    parents = {}
+    for d in (f"{user}/app.slice", f"{user}/app.slice/app-graphical.slice"):
+        if os.path.isdir(d):
+            write(d, "max")
+            wd = libc.inotify_add_watch(ino, d.encode(), 0x100)   # IN_CREATE
+            if wd >= 0:
+                parents[wd] = d
+    launching = {}   # cgroup -> boost end time
+
+    def new_cgroups():
+        try:
+            data = os.read(ino, 65536)
+        except BlockingIOError:
+            return
+        i = 0
+        while i + 16 <= len(data):
+            wd, mask, cookie, ln = struct.unpack_from("iIII", data, i)
+            name = data[i + 16:i + 16 + ln].split(b"\0", 1)[0].decode(errors="replace")
+            i += 16 + ln
+            if wd in parents and name.endswith(".slice"):    # e.g. app-graphical.slice created after we started
+                d = f"{parents[wd]}/{name}"
+                write(d, "max")
+                nwd = libc.inotify_add_watch(ino, d.encode(), 0x100)
+                if nwd >= 0:
+                    parents[nwd] = d
+                continue
+            if wd in parents and name.startswith("app-") and (name.endswith(".scope") or name.endswith(".service")):
+                cg = f"{parents[wd]}/{name}"
+                for _ in range(20):          # the cpu.* files follow the directory
+                    if write(cg, APP_MIN):
+                        launching[cg] = time.monotonic() + LAUNCH_S
+                        break
+                    time.sleep(0.005)
+
+    def expire():
+        now = time.monotonic()
+        for cg, end in list(launching.items()):
+            if now >= end:
+                del launching[cg]
+                if cg != boosted:
+                    write(cg, "0")
+
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(os.path.join(sock_dir, ".socket2.sock"))
     focus()
     buf = b""
     with s:
-        while chunk := s.recv(4096):
-            buf += chunk
-            *lines, buf = buf.split(b"\n")
-            if any(line.startswith(b"activewindowv2>>") for line in lines):
-                focus()
+        while True:
+            timeout = max(0.05, min(launching.values()) - time.monotonic()) if launching else None
+            ready, _, _ = select.select([s, ino], [], [], timeout)
+            if ino in ready:
+                new_cgroups()
+            if s in ready:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                *lines, buf = buf.split(b"\n")
+                if any(line.startswith(b"activewindowv2>>") for line in lines):
+                    focus()
+            expire()
+    os.close(ino)
     if boosted:
         write(boosted, "0")
 
