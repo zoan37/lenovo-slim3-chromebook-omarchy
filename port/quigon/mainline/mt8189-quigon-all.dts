@@ -13,3 +13,4 @@
 #include "mt8189-quigon-suspend.dtsi"
 #include "mt8189-quigon-tpm.dtsi"
 #include "mt8189-quigon-venc.dtsi"
+#include "mt8189-quigon-cmdq.dtsi"

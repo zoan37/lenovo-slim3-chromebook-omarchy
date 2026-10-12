@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Display updates through the GCE (CMDQ), as in ChromeOS: mediatek-drm then queues each frame's OVL/RDMA register
+ * writes in a GCE packet that waits for the mutex's frame event, so a page flip lands between frames. Without it the
+ * CPU writes them from the vblank interrupt, and a late interrupt lands the flip mid-scanout (tearing, most visible
+ * in the top rows). Threads 0/1 of gce_d (one per CRTC) and the event IDs are ChromeOS's; subsys 0 is 0x1400xxxx.
+ */
+&mmsys {
+	mboxes = <&gce_d 0 7>, <&gce_d 1 7>;
+	mediatek,gce-client-reg = <&gce_d 0 0x0000 0x1000>;
+};
+
+&disp_mutex0 {
+	mediatek,gce-client-reg = <&gce_d 0 0x1000 0x1000>;
+	mediatek,gce-events = <0x17e 0x17f>;
+};
+
+&disp_ovl0 {
+	mediatek,gce-client-reg = <&gce_d 0 0x2000 0x1000>;
+};
+
+&disp_ovl1 {
+	mediatek,gce-client-reg = <&gce_d 0 0x3000 0x1000>;
+};
+
+&disp_rdma0 {
+	mediatek,gce-client-reg = <&gce_d 0 0x6000 0x1000>;
+};
+
+&disp_rdma1 {
+	mediatek,gce-client-reg = <&gce_d 0 0x7000 0x1000>;
+};
