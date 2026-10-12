@@ -1,0 +1,45 @@
+From 264bc209a2aa89b4ba1969c7510ed96a9fe71704 Mon Sep 17 00:00:00 2001
+From: quigon <quigon@localhost>
+Date: Sun, 11 Oct 2026 20:50:53 -0400
+Subject: [PATCH] media: mediatek: vcodec: venc: keep the requested size as the
+ visible size in S_FMT(OUTPUT)
+
+---
+ .../platform/mediatek/vcodec/encoder/mtk_vcodec_enc.c    | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/mediatek/vcodec/encoder/mtk_vcodec_enc.c b/drivers/media/platform/mediatek/vcodec/encoder/mtk_vcodec_enc.c
+index 05df44d5ba04..0e8cff7c8434 100644
+--- a/drivers/media/platform/mediatek/vcodec/encoder/mtk_vcodec_enc.c
++++ b/drivers/media/platform/mediatek/vcodec/encoder/mtk_vcodec_enc.c
+@@ -470,6 +470,7 @@ static int vidioc_venc_s_fmt_out(struct file *file, void *priv,
+ 	const struct mtk_vcodec_enc_pdata *pdata = ctx->dev->venc_pdata;
+ 	struct vb2_queue *vq;
+ 	struct mtk_q_data *q_data = mtk_venc_get_q_data(ctx, f->type);
++	u32 width, height;
+ 	int ret, i;
+ 	const struct mtk_video_fmt *fmt;
+ 
+@@ -486,13 +487,17 @@ static int vidioc_venc_s_fmt_out(struct file *file, void *priv,
+ 		f->fmt.pix.pixelformat = fmt->fourcc;
+ 	}
+ 
++	/* the requested size is the visible size; try_fmt aligns it to the coded size */
++	width = f->fmt.pix_mp.width;
++	height = f->fmt.pix_mp.height;
++
+ 	ret = vidioc_try_fmt_out(ctx, f, fmt);
+ 	if (ret)
+ 		return ret;
+ 
+ 	q_data->fmt = fmt;
+-	q_data->visible_width = f->fmt.pix_mp.width;
+-	q_data->visible_height = f->fmt.pix_mp.height;
++	q_data->visible_width = clamp(width, MTK_VENC_MIN_W, f->fmt.pix_mp.width);
++	q_data->visible_height = clamp(height, MTK_VENC_MIN_H, f->fmt.pix_mp.height);
+ 	q_data->coded_width = f->fmt.pix_mp.width;
+ 	q_data->coded_height = f->fmt.pix_mp.height;
+ 
+-- 
+2.43.0
+

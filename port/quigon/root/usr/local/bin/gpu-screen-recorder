@@ -1,0 +1,52 @@
+#!/bin/bash
+# gpu-screen-recorder stand-in for Omarchy's screen recording (omarchy-capture-screenrecording) on the mainline kernel.
+# The real gpu-screen-recorder doesn't run on Panfrost ("unknown gpu vendor: Mesa", no OpenGL) and has no encoder
+# for this SoC. This takes the same arguments Omarchy passes and records with wf-recorder (Hyprland's screencopy)
+# into the MT8189's H.264 hardware encoder (h264_v4l2m2m, mtk-vcodec-enc). The RGB -> NV12 conversion runs on the CPU
+# (the encoder only takes YUV), so the frame rate is capped at 30 fps unless QUIGON_SCREENRECORD_FPS says otherwise.
+# It runs as "gpu-screen-recorder" (exec -a) so Omarchy's pgrep/pkill -SIGINT "^gpu-screen-recorder" find it, and
+# SIGINT makes wf-recorder finish the MP4.
+#
+# Handled: -w <monitor>|<WxH+X+Y>|portal (portal: the focused monitor), -o <file>, -f <fps>,
+# -a default_output|default_input (both: desktop audio only, wf-recorder takes one source), -ac <codec>.
+# Ignored: -s, -k, -fm, -fallback-cpu-encoding. Anything else (or no hardware encoder): the real one.
+real=/usr/bin/gpu-screen-recorder
+grep -qs mtk-vcodec-enc /sys/class/video4linux/video*/name || exec "$real" "$@"
+command -v wf-recorder >/dev/null || exec "$real" "$@"
+
+target="" out="" fps=60 audio="" acodec=aac
+args=("$@")
+while (($#)); do
+  case $1 in
+  -w) target=$2; shift 2 ;;
+  -o) out=$2; shift 2 ;;
+  -f) fps=$2; shift 2 ;;
+  -a) audio=$2; shift 2 ;;
+  -ac) acodec=$2; shift 2 ;;
+  -s | -k | -fm | -fallback-cpu-encoding | -q | -bm | -cr | -c) shift 2 ;;
+  *) exec "$real" "${args[@]}" ;;
+  esac
+done
+[[ -n $target && -n $out ]] || exec "$real" "${args[@]}"
+
+fps=$(( ${QUIGON_SCREENRECORD_FPS:-30} < fps ? ${QUIGON_SCREENRECORD_FPS:-30} : fps ))
+# fps filter first, so frames over the rate are dropped before the RGB -> NV12 conversion (halves the CPU cost)
+wf=(-y -c h264_v4l2m2m -x nv12 -F "fps=$fps" -r "$fps" -f "$out")
+
+if [[ $target =~ ^([0-9]+)x([0-9]+)\+(-?[0-9]+)\+(-?[0-9]+)$ ]]; then
+  w=${BASH_REMATCH[1]} h=${BASH_REMATCH[2]}
+  wf+=(-g "${BASH_REMATCH[3]},${BASH_REMATCH[4]} ${w}x${h}")
+else
+  [[ $target == portal ]] && target=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+  read -r w h < <(hyprctl monitors -j | jq -r --arg m "$target" '.[] | select(.name == $m) | "\(.width) \(.height)"')
+  wf+=(-o "$target")
+fi
+# ~0.12 bit per pixel and frame: 1920x1200 at 30 fps is about 8 Mbit/s
+wf+=(-p "b=$(( ${w:-1920} * ${h:-1200} * fps * 12 / 100 ))")
+
+case $audio in
+*default_output*) wf+=(--audio="$(pactl get-default-sink).monitor" -C "$acodec") ;;
+*default_input*) wf+=(--audio="$(pactl get-default-source)" -C "$acodec") ;;
+esac
+
+exec -a gpu-screen-recorder /usr/bin/wf-recorder "${wf[@]}"

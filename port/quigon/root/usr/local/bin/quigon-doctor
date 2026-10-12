@@ -103,6 +103,11 @@ check_system() {
     else
       fail "GPU clock on $mfg: GPU DVFS can retune MAINPLL (backlight PWM flicker, buses off-spec); kernel without mainline-mt8189-gpu-ref-mux-mainpll.patch?"
     fi
+    if [[ -x /usr/local/bin/gpu-screen-recorder ]] && command -v wf-recorder >/dev/null; then
+      pass "screen recording: wf-recorder + hardware H.264 (gpu-screen-recorder stand-in)"
+    else
+      fail "screen recording stand-in missing (pacman -S wf-recorder; /usr/local/bin/gpu-screen-recorder from the repo)"
+    fi
     local wm; wm=$(ls -d /sys/fs/cgroup/user.slice/user-*.slice/user@*.service/session.slice/wayland-wm@*.service 2>/dev/null | head -1)
     if ! systemctl is-active -q quigon-uclamp; then
       fail "quigon-uclamp not running: UI bursts land on the slow A55 cores (systemctl enable --now quigon-uclamp)"
