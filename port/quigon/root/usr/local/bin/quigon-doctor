@@ -150,8 +150,8 @@ check_system() {
   else fail "quickshell is $qs / not pinned: 0.3.2 never releases the session lock, so later locks (and lock-before-sleep) fail"; fi
   local hy hyrepo; hy=$(pacman -Q hyprland 2>/dev/null | awk '{print $2}')
   hyrepo=$(pacman -Si hyprland 2>/dev/null | awk '/^Version/{print $3; exit}')
-  if [[ $hy == *-*.1 ]] && grep -q '^IgnorePkg.*hyprland' /etc/pacman.conf; then
-    if [[ -n $hyrepo && $(vercmp "$hyrepo" "${hy%.1}") -gt 0 ]]; then
+  if [[ $hy =~ -[0-9]+\.[0-9]+$ ]] && grep -q '^IgnorePkg.*hyprland' /etc/pacman.conf; then
+    if [[ -n $hyrepo && $(vercmp "$hyrepo" "${hy%.*}") -gt 0 ]]; then
       fail "hyprland $hy (quigon build) is behind Omarchy's $hyrepo: rebuild with scripts/build-hyprland.sh (or roll back: pacman -U /root/pkg-backup/hyprland-*)"
     else
       pass "hyprland $hy pinned (quigon-map-size-hold.patch: no wrong-size first frame on map)"
