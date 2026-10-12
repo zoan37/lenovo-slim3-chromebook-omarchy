@@ -1,16 +1,48 @@
 diff --git i/src/desktop/view/Window.cpp w/src/desktop/view/Window.cpp
-index 8836f73..13c2e74 100644
+index 8836f73..9b1583d 100644
 --- i/src/desktop/view/Window.cpp
 +++ w/src/desktop/view/Window.cpp
-@@ -2074,6 +2074,7 @@ void CWindow::mapWindow() {
+@@ -214,6 +214,7 @@ SP<CWindow> CWindow::fromView(SP<IView> v) {
+ }
+ 
+ CWindow::~CWindow() {
++    quigonForgetMapped(this);
+     if (Desktop::focusState()->window() == m_self) {
+         Desktop::focusState()->surface().reset();
+         Desktop::focusState()->window().reset();
+@@ -2074,6 +2075,7 @@ void CWindow::mapWindow() {
      m_monitor       = PMONITOR;
      m_workspace     = PWORKSPACE;
      m_isMapped      = true;
-+    m_mappedAt      = Time::steadyNow();
++    quigonNoteMapped(this);
      m_animatingIn   = true;
      m_title         = fetchTitle();
      m_firstMap      = true;
-@@ -2709,6 +2710,23 @@ void CWindow::unmapWindow() {
+@@ -2555,7 +2557,23 @@ void CWindow::mapWindow() {
+     Event::bus()->m_events.window.openLate.emit(m_self.lock());
+ }
+ 
++static std::unordered_map<const CWindow*, Time::steady_tp> s_quigonMappedAt;
++
++void Desktop::View::quigonNoteMapped(const CWindow* w) {
++    s_quigonMappedAt[w] = Time::steadyNow();
++}
++
++void Desktop::View::quigonForgetMapped(const CWindow* w) {
++    s_quigonMappedAt.erase(w);
++}
++
++std::optional<Time::steady_tp> Desktop::View::quigonMappedAt(const CWindow* w) {
++    const auto IT = s_quigonMappedAt.find(w);
++    return IT == s_quigonMappedAt.end() ? std::nullopt : std::optional{IT->second};
++}
++
+ void CWindow::unmapWindow() {
++    quigonForgetMapped(this);
+     Log::logger->log(Log::DEBUG, "{:c} unmapped", m_self.lock());
+ 
+     static auto PEXITRETAINSFS = CConfigValue<Config::INTEGER>("misc:exit_window_retains_fullscreen");
+@@ -2709,6 +2727,23 @@ void CWindow::unmapWindow() {
  
      // update lastwindow after focus
      onUnmap();
@@ -35,7 +67,7 @@ index 8836f73..13c2e74 100644
  
  void CWindow::commitWindow() {
 diff --git i/src/desktop/view/Window.hpp w/src/desktop/view/Window.hpp
-index 94681cc..5d138b6 100644
+index 94681cc..662b693 100644
 --- i/src/desktop/view/Window.hpp
 +++ w/src/desktop/view/Window.hpp
 @@ -21,6 +21,7 @@
@@ -46,16 +78,23 @@ index 94681cc..5d138b6 100644
  #include "../../render/Framebuffer.hpp"
  #include "types/GeometricMovableAnimated.hpp"
  #include "types/AlphaModifiable.hpp"
-@@ -153,6 +154,7 @@ namespace Desktop::View {
-         Vector2D                                     m_pendingReportedSize;
-         std::optional<std::pair<uint32_t, Vector2D>> m_pendingSizeAck;
-         std::vector<std::pair<uint32_t, Vector2D>>   m_pendingSizeAcks;
-+        Time::steady_tp                              m_mappedAt; // when it was last mapped, see shouldRenderWindow
+@@ -44,6 +45,14 @@ namespace Desktop {
+ }
  
-         // for floating window offset in workspace animations
-         Vector2D m_floatingOffset = Vector2D(0, 0);
+ namespace Desktop::View {
++    class CWindow;
++
++    // quigon (map-size hold): when a window was last mapped, kept outside CWindow so its layout (and the ABI that
++    // hyprpm plugins built against the stock headers rely on) doesn't change
++    void                           quigonNoteMapped(const CWindow* w);
++    void                           quigonForgetMapped(const CWindow* w);
++    std::optional<Time::steady_tp> quigonMappedAt(const CWindow* w);
++
+ 
+     class CGroup;
+ 
 diff --git i/src/render/Renderer.cpp w/src/render/Renderer.cpp
-index 249f084..f9e9f24 100644
+index 249f084..6ecaff0 100644
 --- i/src/render/Renderer.cpp
 +++ w/src/render/Renderer.cpp
 @@ -231,6 +231,22 @@ bool IHyprRenderer::shouldRenderWindow(PHLWINDOW pWindow, PHLMONITOR pMonitor) {
@@ -67,8 +106,8 @@ index 249f084..f9e9f24 100644
 +    // closed). Drawing that frame shows a wrong-size window until the client redraws at its real size. For up to
 +    // 1 s after mapping (Chrome takes 140-290 ms on MT8189, longer on a cold start), hold back an xdg toplevel whose
 +    // committed geometry is off by more than 10%.
-+    if (pWindow->m_isMapped && !pWindow->m_isX11 && pWindow->m_xdgSurface && pWindow->m_xdgSurface->m_toplevel &&
-+        Time::steadyNow() - pWindow->m_mappedAt < std::chrono::milliseconds(1000)) {
++    if (const auto MAPPEDAT = Desktop::View::quigonMappedAt(pWindow.get()); MAPPEDAT && pWindow->m_isMapped && !pWindow->m_isX11 &&
++        pWindow->m_xdgSurface && pWindow->m_xdgSurface->m_toplevel && Time::steadyNow() - *MAPPEDAT < std::chrono::milliseconds(1000)) {
 +        const auto WANT = pWindow->realToReportSize();
 +        const auto HAVE = pWindow->m_xdgSurface->m_current.geometry.size();
 +        if (WANT.x > 0 && WANT.y > 0 && HAVE.x > 0 && HAVE.y > 0 &&

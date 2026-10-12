@@ -8,7 +8,7 @@
 
 pkgname=(hyprland hyprpm)
 pkgver=0.56.2
-pkgrel=5.6
+pkgrel=5.7
 pkgdesc='a highly customizable dynamic tiling Wayland compositor'
 arch=(aarch64)
 url="https://github.com/hyprwm/${pkgname^}"
@@ -73,7 +73,7 @@ source=("$_archive.tar.gz::$url/releases/download/v$pkgver/source-v$pkgver.tar.g
         quigon-map-size-hold.patch)
 sha256sums=('03ad3f5ef152ff44116ffd56fcf808486211ecabf4f0ba567108ee746ba5cd2e'
             '380bb6d61c36d6c68bcccf242131f5b259734e8570ea39b3bc519b9ed137eddd'
-            'b70f8edfa9bfcf823d2ee2d3328d7016f243dd5d062509589e3ba3d1c11ab740')
+            '8dd651e4ca364eb2eb4bbe982539d4916fa758bcb534341de65c26bf095f0c66')
 
 prepare() {
 	ln -sf hyprland-source "$_archive"
