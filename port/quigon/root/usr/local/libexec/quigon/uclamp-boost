@@ -76,12 +76,22 @@ def session(sock_dir):
     user = f"{CG}/user.slice/user-{uid}.slice/user@{uid}.service"
     for d in (f"{CG}/user.slice", f"{CG}/user.slice/user-{uid}.slice", user, f"{user}/app.slice", f"{user}/session.slice"):
         write(d, "max")
-    try:
-        hypr_pid = int(open(os.path.join(sock_dir, "hyprland.lock")).readline())
-    except (OSError, ValueError):
-        hypr_pid = None
+    hypr_pid = None
+    for _ in range(50):          # at boot the lock file exists a moment before Hyprland writes its pid into it
+        try:
+            hypr_pid = int(open(os.path.join(sock_dir, "hyprland.lock")).readline())
+            break
+        except (OSError, ValueError):
+            time.sleep(0.2)
     shell = cgroup_of(hypr_pid) if hypr_pid else None
-    if shell and write(shell, SHELL_MIN):
+    if not shell:
+        log(f"no Hyprland pid in {sock_dir}/hyprland.lock: shell not boosted")
+    ok = False
+    for _ in range(50 if shell else 0):      # ...and before systemd enables the cpu controller on its cgroup
+        if ok := write(shell, SHELL_MIN):
+            break
+        time.sleep(0.2)
+    if ok:
         log(f"shell {shell.rsplit('/', 1)[-1]}: uclamp.min {SHELL_MIN}%")
     elif shell:
         log(f"no cpu.uclamp.min in {shell} (kernel without UCLAMP_TASK_GROUP, or no cpu controller there)")

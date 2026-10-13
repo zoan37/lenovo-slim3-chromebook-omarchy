@@ -1,0 +1,11 @@
+[Unit]
+Description=Recompress idle zram swap pages with zstd
+ConditionPathExists=/sys/block/zram0/recompress
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/zram-recompress
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+AllowedCPUs=0-5

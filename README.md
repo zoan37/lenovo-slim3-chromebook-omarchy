@@ -56,6 +56,7 @@ Omarchy's own switches keep working under both: `quigon-mainline.service` masks 
 | Backlight/clocks | Steady: GPU DVFS used to retune MAINPLL (via mainpll_d6), jumping the backlight PWM 2 → 3 kHz (brief dimming while scrolling x.com) and running the main buses 7% fast; fixed in def11 ([notes](notes/mainline-20261009.md)) |
 | GPU clocking | 526 MHz floor and 20 ms polling for Panfrost's DVFS (it sawtoothed 390 ↔ 1100 MHz): much smoother animation and scrolling ([notes](notes/mainline-20261009.md)) |
 | Responsiveness | The desktop and the focused app run on the 2 fast cores (uclamp, as ChromeOS): short UI bursts 2.4× faster, app launches boosted too (terminal 413 → 323 ms, Chrome 1027 → 853 ms), no idle cost ([notes](notes/mainline-20261009.md)) |
+| Kernel tuning, swap | ChromeOS's kernel settings (1000 Hz tick, 3-level page tables, lazy RCU) since def15; swap in RAM uses lz4 like ChromeOS (2.25× faster swap-in than zstd) with idle pages recompressed to zstd ([notes](notes/mainline-20261009.md)) |
 | Power | ~1.3–1.9 W idle on battery (screen dim, nothing plugged in), ~7 W under full load, 83 °C max |
 | Firewall | ufw |
 | Debug | SuzyQ (home-made): GSC/AP/EC consoles, kernel log on the AP UART, CCD open, remote reset ([notes](notes/suzyq-20261010.md)) |

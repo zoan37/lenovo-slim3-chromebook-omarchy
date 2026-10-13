@@ -67,7 +67,11 @@ check_system() {
   done
   [[ -f /etc/systemd/system/seatd.service.d/novt.conf ]] && pass "seatd SEATD_VTBOUND=0 drop-in" || fail "seatd no-VT drop-in missing"
   [[ -f /etc/systemd/logind.conf.d/30-quigon-lock-key.conf ]] && pass "lock key doesn't suspend (logind drop-in)" || fail "logind lock-key drop-in missing"
-  swapon --show=NAME --noheadings | grep -q zram && pass "zram swap active" || fail "zram swap not active"
+  swapon --show=NAME --noheadings | grep -q zram && pass "zram swap active" || fail "zram swap not active (a kernel without the lz4 zram backend? see zram-generator.conf)"
+  if grep -q '\[lz4\]' /sys/block/zram0/comp_algorithm 2>/dev/null; then
+    grep -q zstd /sys/block/zram0/recomp_algorithm 2>/dev/null && systemctl is-enabled -q quigon-zram-recompress.timer 2>/dev/null &&
+      pass "zram lz4, idle pages recompressed with zstd" || fail "zram lz4 without zstd recompression (recomp_algorithm or quigon-zram-recompress.timer)"
+  fi
 
   if [[ $kver == *-quigon* ]]; then
     section "Mainline kernel"

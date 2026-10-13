@@ -1,0 +1,11 @@
+#!/bin/sh
+# zram-recompress: recompress swap pages that have been idle for IDLE_S seconds (default 600) with zram's secondary
+# algorithm (zstd; lz4 is the primary, see /etc/systemd/zram-generator.conf). Run by quigon-zram-recompress.timer at
+# idle priority on the little cores. Pages swapped in later pay zstd's slower decompression, but they were cold.
+z=/sys/block/zram0
+grep -q zstd $z/recomp_algorithm 2>/dev/null || exit 0     # kernel without ZRAM_MULTI_COMP, or zstd not set up
+before=$(awk '{print $2}' $z/mm_stat)
+echo "${IDLE_S:-600}" > $z/idle || exit 0                  # mark pages not accessed for IDLE_S seconds
+echo type=idle > $z/recompress 2>/dev/null
+after=$(awk '{print $2}' $z/mm_stat)
+echo "zram compressed size $((before >> 20)) -> $((after >> 20)) MB"
