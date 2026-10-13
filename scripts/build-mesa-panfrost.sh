@@ -4,6 +4,7 @@
 # Ghostty needs GL 4.3 and reads an SSBO in its vertex shader. Stock Panfrost reports 0 vertex-stage SSBOs, so the
 # link fails ("Too many vertex shader storage blocks (1/0)"). port/quigon/patches/mesa-panfrost-ro-vertex-ssbo.patch
 # adds PAN_RO_VERTEX_SSBO=1: vertex shaders get SSBOs, and any vertex SSBO write/atomic is dropped (read-only).
+# mesa-panfrost-valhall-instance-offset.patch: base instance on Valhall (GTK 4's GPU renderer needs it at GL 4.3).
 # The GL version itself is raised by the wrapper (MESA_GL_VERSION_OVERRIDE=4.3 MESA_GLSL_VERSION_OVERRIDE=430),
 # see port/quigon/root/usr/local/bin/quigon-ghostty.
 #
@@ -49,6 +50,8 @@ mkdir -p "$WORK"; cd "$WORK"
 echo "$SHA256  mesa-$V.tar.xz" | sha256sum -c --quiet
 rm -rf "mesa-$V" && tar xf "mesa-$V.tar.xz" && cd "mesa-$V"
 patch -p1 --no-backup-if-mismatch < "$PATCH"
+# Valhall instance offset (GTK's GPU renderer in Ghostty drew only the first item of instanced batches)
+patch -p1 --no-backup-if-mismatch < "${PATCH_IOFS:-$(dirname "$PATCH")/mesa-panfrost-valhall-instance-offset.patch}"
 
 log() { echo "== $*"; }
 run() { local l=$WORK/$1.log; shift; "$@" > "$l" 2>&1 || { tail -40 "$l"; echo "FAILED, see $l" >&2; exit 1; }; }

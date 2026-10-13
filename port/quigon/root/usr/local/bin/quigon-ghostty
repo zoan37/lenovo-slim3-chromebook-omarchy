@@ -20,9 +20,10 @@ gpu() {
 if [[ $(uname -r) == *-quigon* ]]; then
   if [[ -e $P/lib/libgallium-26.2.4.so ]]; then
     gpu $P; export PAN_RO_VERTEX_SSBO=1
-    # GTK's GPU renderer (on this forced desktop GL 4.3 context) drops the titles of all but one tab in the tab bar;
-    # the cairo renderer draws GTK's own widgets correctly, and the terminal itself still renders on the GPU.
-    export GSK_RENDERER=${GSK_RENDERER:-cairo}
+    # GTK's GPU renderer (ngl). It used to lose all but one tab title: at the forced GL 4.3 GTK draws with a base
+    # instance, which Panfrost ignored on Valhall (fixed in this Mesa, mesa-panfrost-valhall-instance-offset.patch).
+    # GSK_RENDERER=cairo also draws correctly but costs ~23 ms of CPU per keystroke (3.7 ms with ngl).
+    export GSK_RENDERER=${GSK_RENDERER:-ngl}
   else
     export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
   fi

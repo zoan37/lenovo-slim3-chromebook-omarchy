@@ -1,0 +1,27 @@
+panfrost (Valhall): honour the first instance of a draw
+
+Panfrost only exposes start_instance/draw_parameters on Bifrost (v6-v7), and on Valhall (v9) the JM draw path never
+sets the Primitive descriptor's "Instance offset", so instance-rate attributes were always fetched from instance 0.
+Stock Panfrost hides this (no ARB/EXT_base_instance on v9), but Ghostty's private Mesa reports GL 4.3
+(MESA_GL_VERSION_OVERRIDE, Ghostty needs it), so GTK 4's GPU renderer used glDrawArraysInstancedBaseInstance and drew
+only the first item of each instanced batch: the tab bar lost all but one title, its separators and highlights.
+GTK's cairo renderer avoided that but cost ~23 ms of CPU per keystroke in Ghostty (3.7 ms on the GPU renderer).
+
+--- a/src/gallium/drivers/panfrost/pan_jm.c
++++ b/src/gallium/drivers/panfrost/pan_jm.c
+@@ -747,6 +747,15 @@
+          else
+             cfg.base_vertex_offset = draw->start;
+ 
++         /* quigon: the first instance (glDraw*BaseInstance, GL 4.2) offsets
++          * instance-rate attribute fetches; without it every draw read the
++          * attributes of instance 0 (GTK 4 GPU renderer: only the first item
++          * of each instanced batch drawn).
++          */
++#if PAN_ARCH >= 9
++         cfg.instance_offset = info->start_instance;
++#endif
++
+          /* Indices are moved outside the primitive descriptor
+           * on Valhall, so we don't need to set that here
+           */
