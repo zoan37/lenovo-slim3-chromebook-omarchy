@@ -124,6 +124,14 @@ Day-to-day health check: `quigon-doctor`.
   cryptsetup + a passphrase prompt to the mainline kernels' embedded initramfs (the EC keyboard is built in, so it works
   that early), and decide what the ChromeOS-kernel fallback (KERN-C) does. No separate lock-at-boot in the meantime
   (user's choice, 2026-10-12).
+- Security review against a standard Omarchy ISO install (listed 2026-10-12 from notes, to verify on the device first):
+  - Re-lock CCD (opened with all capabilities Always and write protect off for the SuzyQ work) when not debugging.
+  - Developer mode allows USB boot (Ctrl+U): anyone can boot another system; disk encryption covers the data side.
+  - sshd runs with root and password login (the ISO runs no sshd): key-only, no root password login, or LAN-only in ufw.
+  - Turn off the bring-up command bridge agent if it is still running.
+  - Kernel hardening the trimmed config dropped (Arch/ChromeOS have it): HARDENED_USERCOPY, SLAB_FREELIST_HARDENED /
+    _RANDOM, RANDOMIZE_KSTACK_OFFSET_DEFAULT (cheap); INIT_ON_ALLOC_DEFAULT_ON (costs a little).
+  - No snapshots before updates (the ISO uses btrfs + Snapper with boot-menu rollback; ROOT-C is ext4).
 - Kernel updates: rebase the patches onto newer kernels as MT8189 support lands upstream; send the remaining generic
   fixes upstream (the IT61620 audio format; the MT6359 RTC year base was NAKed upstream in 2025, so it stays local).
 - Why PCIe L1.2 hangs s2idle on mainline (worked around: L1.2 only while awake).
