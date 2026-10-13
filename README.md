@@ -118,6 +118,12 @@ Day-to-day health check: `quigon-doctor`.
 
 ## To do
 
+- Full-disk encryption, as the Omarchy ISO sets up by default (LUKS; its password is the only one at boot, then
+  autologin). This install has none: ROOT-C is plain ext4 and `quigon-desktop@` logs in automatically, so a cold boot
+  goes straight to the desktop (the lid and sleep still lock). Plan: back up, LUKS-format ROOT-C and restore, add
+  cryptsetup + a passphrase prompt to the mainline kernels' embedded initramfs (the EC keyboard is built in, so it works
+  that early), and decide what the ChromeOS-kernel fallback (KERN-C) does. No separate lock-at-boot in the meantime
+  (user's choice, 2026-10-12).
 - Kernel updates: rebase the patches onto newer kernels as MT8189 support lands upstream; send the remaining generic
   fixes upstream (the IT61620 audio format; the MT6359 RTC year base was NAKed upstream in 2025, so it stays local).
 - Why PCIe L1.2 hangs s2idle on mainline (worked around: L1.2 only while awake).
