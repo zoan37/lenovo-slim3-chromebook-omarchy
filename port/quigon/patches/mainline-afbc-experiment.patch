@@ -1,0 +1,274 @@
+From 4ce42add06e5e11a22c66652b86aa03ee217be8a Mon Sep 17 00:00:00 2001
+From: zoan37 <agentzoan@gmail.com>
+Date: Mon, 12 Oct 2026 22:30:05 -0400
+Subject: [PATCH] quigon experiment: AFBC scanout on MT8189 OVL0
+
+Collabora RFC (N. Prado, 2025-12-30: AFBC fixes for MediaTek DRM) patches
+1-4 and 6, plus: AFBC only on the OVLs in mediatek_drm.afbc_ovl_mask
+(default OVL0, the internal panel), and Lx_2ND_SUBBUF only on cropped
+AFBC layers (mediatek_drm.afbc_2nd_subbuf=-1). With 2ND_SUBBUF on a full
+layer the OVL skipped the first 4 rows, drew stray pixels after the image
+and read past the buffer (IOMMU faults on larb1 port 4).
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/mediatek/mtk_disp_ovl.c | 68 ++++++++++++++++++++++---
+ drivers/gpu/drm/mediatek/mtk_plane.c    | 48 +++++++++++++++--
+ drivers/gpu/drm/mediatek/mtk_plane.h    |  6 ++-
+ 3 files changed, 112 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+index 31f9dadb611d..a9ce64adae9f 100644
+--- a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
++++ b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+@@ -39,6 +39,11 @@
+ #define OVL_PITCH_MSB_2ND_SUBBUF			BIT(16)
+ #define DISP_REG_OVL_PITCH(n)			(0x0044 + 0x20 * (n))
+ #define OVL_CONST_BLEND					BIT(28)
++#define DISP_REG_OVL_CLIP(n)			(0x004C + 0x20 * (n))
++#define OVL_CLIP_LEFT					GENMASK(7, 0)
++#define OVL_CLIP_RIGHT					GENMASK(15, 8)
++#define OVL_CLIP_TOP					GENMASK(23, 16)
++#define OVL_CLIP_BOTTOM					GENMASK(31, 24)
+ #define DISP_REG_OVL_RDMA_CTRL(n)		(0x00c0 + 0x20 * (n))
+ #define DISP_REG_OVL_RDMA_GMC(n)		(0x00c8 + 0x20 * (n))
+ #define DISP_REG_OVL_ADDR_MT2701		0x0040
+@@ -236,9 +241,25 @@ size_t mtk_ovl_get_num_formats(struct device *dev)
+ 	return ovl->data->num_formats;
+ }
+ 
++/*
++ * quigon AFBC experiment: which OVLs (bit = "ovl" alias id) announce AFBC (0 = none; read when the planes are
++ * created), and whether AFBC layers set Lx_2ND_SUBBUF (MediaTek suggested it is only needed with cropping; runtime,
++ * takes effect on the next commit).
++ */
++static unsigned int afbc_ovl_mask = 1;
++module_param(afbc_ovl_mask, uint, 0444);
++MODULE_PARM_DESC(afbc_ovl_mask, "OVLs (bit = ovl alias id) that announce AFBC");
++static int afbc_2nd_subbuf = -1;
++module_param(afbc_2nd_subbuf, int, 0644);
++MODULE_PARM_DESC(afbc_2nd_subbuf, "Lx_2ND_SUBBUF on AFBC layers: 1 always, 0 never, -1 only when the layer is cropped");
++
+ bool mtk_ovl_is_afbc_supported(struct device *dev)
+ {
+ 	struct mtk_disp_ovl *ovl = dev_get_drvdata(dev);
++	int id = of_alias_get_id(dev->of_node, "ovl");
++
++	if (id < 0 || id > 31 || !(afbc_ovl_mask & BIT(id)))
++		return false;
+ 
+ 	return ovl->data->supports_afbc;
+ }
+@@ -362,6 +383,13 @@ int mtk_ovl_layer_check(struct device *dev, unsigned int idx,
+ 	if (state->fb->format->is_yuv && (state->rotation & ~DRM_MODE_ROTATE_0))
+ 		return -EINVAL;
+ 
++	/*
++	 * AFBC buffers with width > 1920 are not supported and produce
++	 * artifacts, so should be disabled.
++	 */
++	if (state->fb->modifier != DRM_FORMAT_MOD_LINEAR && state->fb->width > 1920)
++		return -EINVAL;
++
+ 	return 0;
+ }
+ 
+@@ -477,10 +505,18 @@ static void mtk_ovl_afbc_layer_config(struct mtk_disp_ovl *ovl,
+ 	unsigned int hdr_addr = pending->hdr_addr;
+ 
+ 	if (pending->modifier != DRM_FORMAT_MOD_LINEAR) {
++		/*
++		 * Lx_2ND_SUBBUF is only needed when the layer is cropped; on a full, block-aligned
++		 * layer it makes the OVL skip the first 4 rows and show stray pixels after the image.
++		 */
++		bool cropped = pending->clip_left || pending->clip_right ||
++			       pending->clip_top || pending->clip_bottom;
++		bool subbuf = afbc_2nd_subbuf < 0 ? cropped : afbc_2nd_subbuf;
++
+ 		mtk_ddp_write_relaxed(cmdq_pkt, hdr_addr, &ovl->cmdq_reg, ovl->regs,
+ 				      DISP_REG_OVL_HDR_ADDR(ovl, idx));
+ 		mtk_ddp_write_relaxed(cmdq_pkt,
+-				      OVL_PITCH_MSB_2ND_SUBBUF | pitch_msb,
++				      (subbuf ? OVL_PITCH_MSB_2ND_SUBBUF : 0) | pitch_msb,
+ 				      &ovl->cmdq_reg, ovl->regs, DISP_REG_OVL_PITCH_MSB(idx));
+ 		mtk_ddp_write_relaxed(cmdq_pkt, hdr_pitch, &ovl->cmdq_reg, ovl->regs,
+ 				      DISP_REG_OVL_HDR_PITCH(ovl, idx));
+@@ -498,13 +534,14 @@ void mtk_ovl_layer_config(struct device *dev, unsigned int idx,
+ 	struct mtk_plane_pending_state *pending = &state->pending;
+ 	unsigned int addr = pending->addr;
+ 	unsigned int pitch_lsb = pending->pitch & GENMASK(15, 0);
++	unsigned long long modifier = pending->modifier;
+ 	unsigned int fmt = pending->format;
+ 	unsigned int rotation = pending->rotation;
+ 	unsigned int offset = (pending->y << 16) | pending->x;
+-	unsigned int src_size = (pending->height << 16) | pending->width;
+ 	unsigned int blend_mode = state->base.pixel_blend_mode;
+ 	unsigned int ignore_pixel_alpha = 0;
+-	unsigned int con;
++	unsigned int src_size, con, src_width, src_height;
++	unsigned int clip = 0;
+ 
+ 	if (!pending->enable) {
+ 		mtk_ovl_layer_off(dev, idx, cmdq_pkt);
+@@ -549,9 +586,26 @@ void mtk_ovl_layer_config(struct device *dev, unsigned int idx,
+ 		addr += pending->pitch - 1;
+ 	}
+ 
+-	if (ovl->data->supports_afbc)
+-		mtk_ovl_set_afbc(ovl, cmdq_pkt, idx,
+-				 pending->modifier != DRM_FORMAT_MOD_LINEAR);
++	if (ovl->data->supports_afbc && (modifier != DRM_FORMAT_MOD_LINEAR)) {
++		/*
++		 * In AFBC mode, OVL_SRC_SIZE must be block aligned. Due to this
++		 * limitation of the AFBC format, OVL_CLIP is used to adjust the
++		 * output size of the layer.
++		 */
++		clip = FIELD_PREP(OVL_CLIP_BOTTOM, pending->clip_bottom) |
++		       FIELD_PREP(OVL_CLIP_TOP, pending->clip_top) |
++		       FIELD_PREP(OVL_CLIP_RIGHT, pending->clip_right) |
++		       FIELD_PREP(OVL_CLIP_LEFT, pending->clip_left);
++		src_height = pending->height + pending->clip_top + pending->clip_bottom;
++		src_width = pending->width + pending->clip_left + pending->clip_right;
++		mtk_ovl_set_afbc(ovl, cmdq_pkt, idx, true);
++	} else {
++		src_height = pending->height;
++		src_width = pending->width;
++		mtk_ovl_set_afbc(ovl, cmdq_pkt, idx, false);
++	}
++
++	src_size = (src_height << 16) | src_width;
+ 
+ 	mtk_ddp_write_relaxed(cmdq_pkt, con, &ovl->cmdq_reg, ovl->regs,
+ 			      DISP_REG_OVL_CON(idx));
+@@ -559,6 +613,8 @@ void mtk_ovl_layer_config(struct device *dev, unsigned int idx,
+ 			      &ovl->cmdq_reg, ovl->regs, DISP_REG_OVL_PITCH(idx));
+ 	mtk_ddp_write_relaxed(cmdq_pkt, src_size, &ovl->cmdq_reg, ovl->regs,
+ 			      DISP_REG_OVL_SRC_SIZE(idx));
++	mtk_ddp_write_relaxed(cmdq_pkt, clip, &ovl->cmdq_reg, ovl->regs,
++			      DISP_REG_OVL_CLIP(idx));
+ 	mtk_ddp_write_relaxed(cmdq_pkt, offset, &ovl->cmdq_reg, ovl->regs,
+ 			      DISP_REG_OVL_OFFSET(idx));
+ 	mtk_ddp_write_relaxed(cmdq_pkt, addr, &ovl->cmdq_reg, ovl->regs,
+diff --git a/drivers/gpu/drm/mediatek/mtk_plane.c b/drivers/gpu/drm/mediatek/mtk_plane.c
+index 3fad7f2ff004..66946fa8a26c 100644
+--- a/drivers/gpu/drm/mediatek/mtk_plane.c
++++ b/drivers/gpu/drm/mediatek/mtk_plane.c
+@@ -22,6 +22,9 @@
+ 
+ static const u64 modifiers[] = {
+ 	DRM_FORMAT_MOD_LINEAR,
++	DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_32x8 |
++				AFBC_FORMAT_MOD_SPLIT |
++				AFBC_FORMAT_MOD_SPARSE),
+ 	DRM_FORMAT_MOD_INVALID,
+ };
+ 
+@@ -64,7 +67,26 @@ static bool mtk_plane_format_mod_supported(struct drm_plane *plane,
+ 					   uint32_t format,
+ 					   uint64_t modifier)
+ {
+-	return modifier == DRM_FORMAT_MOD_LINEAR;
++	if (modifier == DRM_FORMAT_MOD_LINEAR)
++		return true;
++
++	if (modifier != DRM_FORMAT_MOD_ARM_AFBC(
++				AFBC_FORMAT_MOD_BLOCK_SIZE_32x8 |
++				AFBC_FORMAT_MOD_SPLIT |
++				AFBC_FORMAT_MOD_SPARSE))
++		return false;
++
++	if (format != DRM_FORMAT_XRGB8888 &&
++	    format != DRM_FORMAT_ARGB8888 &&
++	    format != DRM_FORMAT_BGRX8888 &&
++	    format != DRM_FORMAT_BGRA8888 &&
++	    format != DRM_FORMAT_ABGR8888 &&
++	    format != DRM_FORMAT_XBGR8888 &&
++	    format != DRM_FORMAT_RGB888 &&
++	    format != DRM_FORMAT_BGR888)
++		return false;
++
++	return true;
+ }
+ 
+ static void mtk_plane_destroy_state(struct drm_plane *plane,
+@@ -109,6 +131,7 @@ static void mtk_plane_update_new_state(struct drm_plane_state *new_state,
+ 				       struct mtk_plane_state *mtk_plane_state)
+ {
+ 	struct drm_framebuffer *fb = new_state->fb;
++	unsigned int clip_left = 0, clip_top = 0, clip_right = 0, clip_bottom = 0;
+ 	struct drm_gem_dma_object *dma_obj;
+ 	struct drm_gem_object *gem;
+ 	unsigned int pitch, format;
+@@ -143,6 +166,22 @@ static void mtk_plane_update_new_state(struct drm_plane_state *new_state,
+ 		int x_offset_in_blocks = (new_state->src.x1 >> 16) / AFBC_DATA_BLOCK_WIDTH;
+ 		int y_offset_in_blocks = (new_state->src.y1 >> 16) / AFBC_DATA_BLOCK_HEIGHT;
+ 		int hdr_size, hdr_offset;
++		int src_width = drm_rect_width(&new_state->src) >> 16;
++		int src_height = drm_rect_height(&new_state->src) >> 16;
++		unsigned int remainder_right, remainder_bottom;
++
++		/*
++		 * In AFBC mode, the source size configured needs to be a
++		 * multiple of the AFBC data block size. Compute and save the
++		 * necessary clips so the indeded x, y, width and height are
++		 * obtained in the output despite this constraint.
++		 */
++		clip_left = (new_state->src.x1 >> 16) % AFBC_DATA_BLOCK_WIDTH;
++		clip_top = (new_state->src.y1 >> 16) % AFBC_DATA_BLOCK_HEIGHT;
++		remainder_right = (src_width + clip_left) % AFBC_DATA_BLOCK_WIDTH;
++		clip_right = remainder_right ? AFBC_DATA_BLOCK_WIDTH - remainder_right : 0;
++		remainder_bottom = (src_height + clip_top) % AFBC_DATA_BLOCK_HEIGHT;
++		clip_bottom = remainder_bottom ? AFBC_DATA_BLOCK_HEIGHT - remainder_bottom : 0;
+ 
+ 		hdr_pitch = width_in_blocks * AFBC_HEADER_BLOCK_SIZE;
+ 		pitch = width_in_blocks * AFBC_DATA_BLOCK_WIDTH *
+@@ -159,10 +198,9 @@ static void mtk_plane_update_new_state(struct drm_plane_state *new_state,
+ 		 */
+ 		hdr_addr = addr + hdr_offset;
+ 
+-		/* The data plane is offset by 1 additional block. */
+ 		offset = pitch * y_offset_in_blocks +
+ 			 AFBC_DATA_BLOCK_WIDTH * AFBC_DATA_BLOCK_HEIGHT *
+-			 fb->format->cpp[0] * (x_offset_in_blocks + 1);
++			 fb->format->cpp[0] * x_offset_in_blocks;
+ 
+ 		/*
+ 		 * Using dma_addr_t variable to calculate with multiplier of different types,
+@@ -183,6 +221,10 @@ static void mtk_plane_update_new_state(struct drm_plane_state *new_state,
+ 	mtk_plane_state->pending.y = new_state->dst.y1;
+ 	mtk_plane_state->pending.width = drm_rect_width(&new_state->dst);
+ 	mtk_plane_state->pending.height = drm_rect_height(&new_state->dst);
++	mtk_plane_state->pending.clip_left = clip_left;
++	mtk_plane_state->pending.clip_top = clip_top;
++	mtk_plane_state->pending.clip_right = clip_right;
++	mtk_plane_state->pending.clip_bottom = clip_bottom;
+ 	mtk_plane_state->pending.rotation = new_state->rotation;
+ 	mtk_plane_state->pending.color_encoding = new_state->color_encoding;
+ }
+diff --git a/drivers/gpu/drm/mediatek/mtk_plane.h b/drivers/gpu/drm/mediatek/mtk_plane.h
+index 95c5fa5295d8..a9cfb2ee5859 100644
+--- a/drivers/gpu/drm/mediatek/mtk_plane.h
++++ b/drivers/gpu/drm/mediatek/mtk_plane.h
+@@ -13,7 +13,7 @@
+ #define AFBC_DATA_BLOCK_WIDTH 32
+ #define AFBC_DATA_BLOCK_HEIGHT 8
+ #define AFBC_HEADER_BLOCK_SIZE 16
+-#define AFBC_HEADER_ALIGNMENT 1024
++#define AFBC_HEADER_ALIGNMENT 128
+ 
+ struct mtk_plane_pending_state {
+ 	bool				config;
+@@ -28,6 +28,10 @@ struct mtk_plane_pending_state {
+ 	unsigned int			y;
+ 	unsigned int			width;
+ 	unsigned int			height;
++	unsigned int			clip_left;
++	unsigned int			clip_top;
++	unsigned int			clip_right;
++	unsigned int			clip_bottom;
+ 	unsigned int			rotation;
+ 	bool				dirty;
+ 	bool				async_dirty;
+-- 
+2.43.0
+
