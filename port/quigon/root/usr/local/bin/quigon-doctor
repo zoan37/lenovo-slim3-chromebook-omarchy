@@ -166,7 +166,19 @@ check_system() {
 
   section "Omarchy patches"
   local qs; qs=$(pacman -Q quickshell 2>/dev/null | awk '{print $2}')
-  if grep -q '^IgnorePkg.*quickshell' /etc/pacman.conf && [[ $qs == 0.3.1* ]]; then pass "quickshell $qs pinned (0.3.2 breaks re-locking)"
+  # quigon build (pkgrel <omarchy's>.1): Omarchy's package + the unlock fix (quickshell PR #1289); stock 0.3.2 never
+  # releases the session lock, so later locks (and lock-before-sleep) fail. It uses Qt private APIs: rebuild after Qt
+  # minor upgrades (scripts/build-quigon-pkg.sh quickshell).
+  local qsrepo; qsrepo=$(pacman -Si quickshell 2>/dev/null | awk '/^Version/{print $3; exit}')
+  if [[ $qs =~ -[0-9]+\.[0-9]+$ ]] && grep -q '^IgnorePkg.*quickshell' /etc/pacman.conf; then
+    if ! quickshell --private-check-compat >/dev/null 2>&1; then
+      fail "quickshell $qs doesn't match the installed Qt: rebuild with scripts/build-quigon-pkg.sh quickshell"
+    elif [[ -n $qsrepo && $(vercmp "$qsrepo" "${qs%.*}") -gt 0 ]]; then
+      fail "quickshell $qs (quigon build) is behind Omarchy's $qsrepo: rebuild with scripts/build-quigon-pkg.sh quickshell"
+    else
+      pass "quickshell $qs (quigon build with the unlock fix), pinned"
+    fi
+  elif grep -q '^IgnorePkg.*quickshell' /etc/pacman.conf && [[ $qs == 0.3.1* ]]; then pass "quickshell $qs pinned (0.3.2 breaks re-locking)"
   else fail "quickshell is $qs / not pinned: 0.3.2 never releases the session lock, so later locks (and lock-before-sleep) fail"; fi
   local hy hyrepo; hy=$(pacman -Q hyprland 2>/dev/null | awk '{print $2}')
   hyrepo=$(pacman -Si hyprland 2>/dev/null | awk '/^Version/{print $3; exit}')

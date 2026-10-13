@@ -134,3 +134,14 @@ during surface creation" — the 0.3.1 tag still notifies on unlock), and Omarch
 [#14588](https://github.com/omacom/omarchy/issues/14588) (same self-contradictory `lock status`; a comment gives the 0.3.2
 root cause, a tested patch, and "downgrade to the release before 0.3.2"). Related: Omarchy #10299. Remove the
 `IgnorePkg = quickshell` pin once a release with the fix lands.
+
+2026-10-12: Omarchy's update brought Qt 6.12, and 0.3.1 uses 63 Qt private-API symbols (tied to the Qt minor
+version), so the pinned 0.3.1 would have broken the bar. Omarchy's own 0.3.2-4 needs a Qt 6.12 workaround patch
+(`load_qtquick_611.patch`) and still has the lock bug (#1230 open, fix in PR #1289 not merged). Now quigon builds
+[`quickshell`](../port/quigon/pkgbuilds/quickshell) 0.3.2-4.1: Omarchy's PKGBUILD and patch + PR #1289
+(`quigon-lock-unlock-notify.patch`), built against Qt 6.12 with [`build-quigon-pkg.sh`](../scripts/build-quigon-pkg.sh)
+(generalised from build-hyprland.sh), still under `IgnorePkg`. `quigon-doctor` fails if it no longer matches the
+installed Qt (`quickshell --private-check-compat`) or falls behind Omarchy's version. Omarchy blocks a plain
+`pacman -Syu` (pre-transaction hook); the package step ran with `OMARCHY_ALLOW_DIRECT_PACMAN=1`, Omarchy's documented
+bypass, then `omarchy update` for the rest. Also: pacman.conf has no inline comments (`pacman-conf IgnorePkg` listed
+every word of the old comment as an ignored package), so the note about the pins is on its own line now.

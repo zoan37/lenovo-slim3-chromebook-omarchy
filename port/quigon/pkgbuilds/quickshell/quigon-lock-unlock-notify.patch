@@ -1,0 +1,20 @@
+From: dmitrylito (quickshell-mirror/quickshell PR #1289, open as of 2026-10-12)
+Subject: wayland/lock: emit lockStateChanged on unlock
+
+WlSessionLock::unlock() checked isLocked() after releasing the lock, so lockStateChanged never fired on unlock and
+bindings on `locked` stayed stale (quickshell#1230, omarchy#14588): after the first unlock, Omarchy's lock service saw
+itself as locked and every later lock request silently did nothing. Check before releasing.
+
+--- a/src/wayland/session_lock.cpp
++++ b/src/wayland/session_lock.cpp
+@@ -179,8 +179,9 @@ void WlSessionLock::unlock() {
+ 
+ 	this->surfaces.clear();
+ 
++	auto wasLocked = this->isLocked();
+ 	if (this->manager) this->manager->unlock();
+-	if (this->isLocked()) emit this->lockStateChanged();
++	if (wasLocked) emit this->lockStateChanged();
+ }
+ 
+ void WlSessionLock::onScreensChanged() {

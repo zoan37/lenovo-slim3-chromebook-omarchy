@@ -122,5 +122,7 @@ Day-to-day health check: `quigon-doctor`.
   fixes upstream (the IT61620 audio format; the MT6359 RTC year base was NAKed upstream in 2025, so it stays local).
 - Why PCIe L1.2 hangs s2idle on mainline (worked around: L1.2 only while awake).
 - Optional: disk swap on ROOT-C behind zram, systemd-oomd, an 80% battery charge cap (`CHARGER_CROS_CONTROL`).
-- Unpin Quickshell (`IgnorePkg`, held at 0.3.1) once a release fixes quickshell#1230 / omarchy#14588.
+- Drop our Quickshell build (0.3.2-4.1 = Omarchy's package + the unlock fix, `IgnorePkg`) once a release fixes
+  quickshell#1230 / omarchy#14588 (fix: quickshell PR #1289). Until then, rebuild it after Qt minor upgrades
+  (`scripts/build-quigon-pkg.sh quickshell`; `quigon-doctor` says when).
 - Port hypr-tab-drag off Hyprland function hooks (they fail on aarch64).
