@@ -6,7 +6,9 @@
 # the scheduler place those tasks on an A78 and schedutil run it at a matching clock while they run; idle costs
 # nothing. Applied to:
 #   - Hyprland's own service cgroup (Hyprland, Xwayland, the Quickshell bar): SHELL_MIN, all the time
-#   - the cgroup (app-*.scope / app-*.service) of the focused window: APP_MIN, moved on every focus change
+#   - the cgroup (app-*.scope / app-*.service) of the focused window: APP_MIN, moved on every focus change; also the
+#     app cgroups of that process's direct children: Ghostty runs each terminal's program in its own scope
+#     (app-ghostty-surface-transient-*), so Claude Code, editors etc. in the focused terminal were left on the A55s
 #   - a newly created app cgroup, for its first LAUNCH_S seconds (launch boost, as ChromeOS boosts app launches):
 #     an app starts before its window exists, so the focus boost alone left its startup on the A55s
 #   - the user's systemd manager, uwsm's app daemon and the D-Bus broker: APP_MIN, all the time. Every launch goes
@@ -99,25 +101,46 @@ def session(sock_dir):
               f"{user}/session.slice/dbus-broker.service"):
         write(d, APP_MIN)
 
-    boosted = None
+    boosted = set()
+
+    def children_of(pid):
+        """pids whose parent is pid (the kernel has no /proc/<pid>/task/*/children)"""
+        kids = []
+        for p in os.listdir("/proc"):
+            if p.isdigit():
+                try:
+                    with open(f"/proc/{p}/stat") as f:
+                        if int(f.read().rsplit(")", 1)[1].split()[1]) == pid:
+                            kids.append(int(p))
+                except (OSError, ValueError, IndexError):
+                    pass
+        return kids
+
+    def targets():
+        pid = request(sock_dir, "j/activewindow").get("pid")
+        cg = cgroup_of(pid) if pid else None
+        if not cg or not cg.startswith(f"{user}/app.slice/"):
+            return set()         # the shell's own cgroup is boosted already; leave other slices alone
+        out = {cg}
+        for kid in children_of(pid):
+            kcg = cgroup_of(kid)
+            if kcg and kcg.startswith(f"{user}/app.slice/"):
+                out.add(kcg)
+        return out
 
     def focus():
         nonlocal boosted
-        pid = request(sock_dir, "j/activewindow").get("pid")
-        cg = cgroup_of(pid) if pid else None
-        if cg and not cg.startswith(f"{user}/app.slice/"):
-            cg = None            # the shell's own cgroup is boosted already; leave other slices alone
-        if cg == boosted:
-            return
-        if boosted:
-            write(boosted, "0")
-        if cg:
+        new = targets()
+        for cg in boosted - new:
+            if cg not in launching:
+                write(cg, "0")
+        for cg in new - boosted:
             # nested slices on the way (uwsm's app-graphical.slice) must allow it too
             d = os.path.dirname(cg)
             while len(d) > len(f"{user}/app.slice"):
                 write(d, "max")
                 d = os.path.dirname(d)
-        boosted = cg if cg and write(cg, APP_MIN) else None
+        boosted = {cg for cg in new if cg in boosted or write(cg, APP_MIN)}
 
     # launch boost: inotify on the slices uwsm-app creates app scopes/services in
     libc = ctypes.CDLL(None, use_errno=True)
@@ -158,11 +181,15 @@ def session(sock_dir):
 
     def expire():
         now = time.monotonic()
-        for cg, end in list(launching.items()):
-            if now >= end:
-                del launching[cg]
-                if cg != boosted:
-                    write(cg, "0")
+        done = [cg for cg, end in launching.items() if now >= end]
+        if not done:
+            return
+        for cg in done:
+            del launching[cg]
+        focus()                  # a new tab's scope (a child of the focused window) joins the focus boost
+        for cg in done:
+            if cg not in boosted:
+                write(cg, "0")
 
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(os.path.join(sock_dir, ".socket2.sock"))
@@ -184,8 +211,8 @@ def session(sock_dir):
                     focus()
             expire()
     os.close(ino)
-    if boosted:
-        write(boosted, "0")
+    for cg in boosted:
+        write(cg, "0")
 
 
 while True:
