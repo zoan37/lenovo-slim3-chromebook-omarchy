@@ -2,7 +2,9 @@
 # quigon-mainline-generator: adjustments for booting Omarchy on the mainline kernel (release *-quigon*). Under the
 # ChromeOS kernel it does nothing.
 # - The ChromeOS kernel has no VTs, so quigon-desktop@ starts the session straight on seat0. Mainline has VTs, and
-#   logind then requires the session to sit on one: give the launcher tty1 and keep getty off that VT.
+#   logind then requires the session to sit on one: give the launcher tty1 and keep getty off that VT. seatd isn't
+#   VT-bound (SEATD_VTBOUND=0, for the ChromeOS kernel), so quigon-omarchy puts tty1 in graphics mode with its keyboard
+#   off (vt-mode), as a VT-bound seat manager would; TTYReset restores it after the session.
 # (The GPU side is quigon-mainline.service: it masks /etc/quigon/gpu.env so everything uses Mesa/Panfrost.)
 case "$(uname -r)" in *-quigon*) ;; *) exit 0 ;; esac
 normal=${1:-/run/systemd/generator}

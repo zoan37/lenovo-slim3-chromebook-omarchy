@@ -18,6 +18,12 @@ if [[ $(uname -r) == *-quigon* ]]; then
   # renders on the Mali through Panfrost natively, so no libmali, Zink or software overrides at all.
   AQ_DRM_DEVICES=$(readlink -f /dev/dri/by-path/platform-mediatek-drm*-card | head -1)
   export AQ_DRM_DEVICES
+  # Our VT (tty1) to graphics mode with its keyboard off, as a VT-bound seat manager would: seatd isn't (it runs
+  # with SEATD_VTBOUND=0 for the ChromeOS kernel, which has no VTs), so keys also reached tty1 and Ctrl+C there sent
+  # SIGINT to uwsm, stopping the whole session. systemd's TTYReset puts tty1 back to text mode afterwards.
+  if t=$(tty) && [[ $t == /dev/tty[0-9]* ]]; then
+    /usr/local/libexec/quigon/vt-mode graphics "$t" || echo "quigon-omarchy: vt-mode failed on $t" >&2
+  fi
 elif [[ -f /etc/quigon/gpu.env ]]; then
   export AQ_DRM_DEVICES=/dev/dri/card0 AQ_NO_MODIFIERS=1 HYPRLAND_EGL_NO_MODIFIERS=1
   # SDL games default to X11 (Xwayland) when DISPLAY is set, and Zink under Xwayland crashes (DRI3 needs image

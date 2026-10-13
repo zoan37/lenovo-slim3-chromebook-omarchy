@@ -1,0 +1,26 @@
+#!/usr/bin/python3 -I
+# vt-mode graphics|text <tty>: what a seat manager does for a compositor on its VT. Mainline only: seatd runs with
+# SEATD_VTBOUND=0 (the ChromeOS kernel has no VTs), so nothing else does this, and the desktop session's VT (tty1)
+# stayed in text mode with the keyboard on: every key also went to tty1, and Ctrl+C there sent SIGINT to uwsm, which
+# stopped the whole session (2026-10-13).
+#   graphics: KD_GRAPHICS (fbcon stops drawing), keyboard K_OFF (no input to the tty, no VT-switch keys; SysRq still
+#             works), and ISIG off as a second guard. quigon-omarchy runs it on its own VT before starting uwsm.
+#   text:     back to KD_TEXT, Unicode keyboard and ISIG on (by hand; systemd's TTYReset does this after the session).
+import fcntl, sys, termios
+
+KDSETMODE, KD_TEXT, KD_GRAPHICS = 0x4B3A, 0x00, 0x01
+KDSKBMODE, K_UNICODE, K_OFF = 0x4B45, 0x03, 0x04
+
+mode, tty = sys.argv[1], sys.argv[2]
+with open(tty, "rb+", buffering=0) as f:
+    fd = f.fileno()
+    attrs = termios.tcgetattr(fd)
+    if mode == "graphics":
+        fcntl.ioctl(fd, KDSETMODE, KD_GRAPHICS)
+        fcntl.ioctl(fd, KDSKBMODE, K_OFF)
+        attrs[3] &= ~termios.ISIG
+    else:
+        fcntl.ioctl(fd, KDSETMODE, KD_TEXT)
+        fcntl.ioctl(fd, KDSKBMODE, K_UNICODE)
+        attrs[3] |= termios.ISIG
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)

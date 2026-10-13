@@ -67,6 +67,13 @@ check_system() {
   done
   [[ -f /etc/systemd/system/seatd.service.d/novt.conf ]] && pass "seatd SEATD_VTBOUND=0 drop-in" || fail "seatd no-VT drop-in missing"
   [[ -f /etc/systemd/logind.conf.d/30-quigon-lock-key.conf ]] && pass "lock key doesn't suspend (logind drop-in)" || fail "logind lock-key drop-in missing"
+  if [[ $kver == *-quigon* && -e /dev/tty1 ]] && systemctl is-active -q 'quigon-desktop@*' 2>/dev/null; then
+    # the session's VT must be in graphics mode with its keyboard off (quigon-omarchy runs vt-mode), else keys also go
+    # to tty1 and Ctrl+C there stops the whole session
+    local kb; kb=$(python3 -I -c 'import fcntl,struct; b=bytearray(4); fcntl.ioctl(open("/dev/tty1","rb",buffering=0),0x4B44,b); print(struct.unpack("i",b)[0])' 2>/dev/null)
+    [[ $kb == 4 ]] && pass "desktop VT keyboard off (Ctrl+C can't reach the session)" ||
+      fail "tty1 keyboard is on (mode ${kb:-?}): Ctrl+C would stop the desktop session (/usr/local/libexec/quigon/vt-mode graphics /dev/tty1)"
+  fi
   if [[ -x /usr/local/libexec/quigon/wifi-powersave && -e /sys/class/net/wlan0/wireless ]]; then
     local ac=0 p want ps
     for p in /sys/class/power_supply/*; do
