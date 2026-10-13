@@ -1,0 +1,16 @@
+#!/bin/sh
+# wifi-powersave: Wi-Fi power save on battery (as ChromeOS: ~140 mW), off on external power, where it only costs
+# latency (~23 ms on the first request after an idle pause). Run by udev on power supply changes
+# (70-quigon-wifi-powersave.rules) and by NetworkManager after a connection comes up (it re-applies wifi.powersave).
+ac=0
+for p in /sys/class/power_supply/*; do
+	case $(cat "$p/type" 2>/dev/null) in
+	Mains|USB|USB_PD|USB_C) [ "$(cat "$p/online" 2>/dev/null)" = 1 ] && ac=1 ;;
+	esac
+done
+want=on; [ $ac = 1 ] && want=off
+for w in /sys/class/net/*/wireless; do
+	[ -e "$w" ] || continue
+	dev=$(basename "$(dirname "$w")")
+	iw dev "$dev" get power_save 2>/dev/null | grep -q ": $want" || iw dev "$dev" set power_save $want
+done

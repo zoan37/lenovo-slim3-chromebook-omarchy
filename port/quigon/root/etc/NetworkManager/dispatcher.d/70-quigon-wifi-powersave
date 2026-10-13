@@ -1,0 +1,4 @@
+#!/bin/sh
+# NetworkManager applies wifi.powersave when a connection comes up; follow the power source again after that
+[ "$2" = up ] && exec /usr/local/libexec/quigon/wifi-powersave
+exit 0

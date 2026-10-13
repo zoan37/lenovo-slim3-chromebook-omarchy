@@ -1,0 +1,148 @@
+#!/usr/bin/python3 -I
+# preload record|load: learned readahead, so the first launch of an app after boot doesn't wait for the disk (a cold
+# terminal launch took 714 ms against 392 warm, reading ~145 MB). ChromeOS's ureadahead does this for boot files; this
+# learns the desktop apps instead.
+#   record (quigon-preload-record.timer, every 15 min): for every file mapped by the desktop user's processes, note
+#     which parts are in the page cache right now (mincore); merged into STATE with a last-seen time.
+#   load (quigon-preload.service, 30 s after boot, idle I/O + CPU class): readahead (POSIX_FADV_WILLNEED) of those
+#     parts, most recently seen first, up to CAP bytes, skipped when memory is short. It only fills the page cache,
+#     which the kernel drops first when memory is needed.
+import ctypes, glob, json, os, sys, time
+
+STATE = "/var/lib/quigon/preload.json"
+CAP = 768 << 20          # bytes read at boot at most
+KEEP_S = 3 * 86400       # forget files not seen mapped for 3 days
+PAGE = os.sysconf("SC_PAGE_SIZE")
+libc = ctypes.CDLL(None, use_errno=True)
+libc.mmap.restype = ctypes.c_void_p
+libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+libc.mincore.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
+
+
+def desktop_uid():
+    """owner of the newest Hyprland session"""
+    socks = glob.glob("/run/user/*/hypr")
+    return os.stat(max(socks, key=os.path.getmtime)).st_uid if socks else None
+
+
+def mapped_files(uid):
+    files = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            if os.stat(f"/proc/{pid}").st_uid != uid:
+                continue
+            with open(f"/proc/{pid}/maps") as f:
+                for line in f:
+                    parts = line.split(None, 5)
+                    if len(parts) == 6 and parts[5].startswith("/") and not parts[5].rstrip().endswith("(deleted)"):
+                        files.add(parts[5].rstrip("\n"))
+        except OSError:
+            pass
+    return files
+
+
+def resident_ranges(path):
+    """[(offset, length)] of the file's pages in the page cache, coalesced"""
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        size = os.fstat(fd).st_size
+        if size == 0:
+            return [], 0
+        addr = libc.mmap(None, size, 1, 1, fd, 0)        # PROT_READ, MAP_SHARED: maps without faulting anything in
+        if addr in (None, ctypes.c_void_p(-1).value):
+            return [], size
+        try:
+            n = (size + PAGE - 1) // PAGE
+            vec = ctypes.create_string_buffer(n)
+            if libc.mincore(addr, size, vec) != 0:
+                return [], size
+            ranges, start = [], None
+            for i, b in enumerate(vec.raw):
+                if b & 1 and start is None:
+                    start = i
+                elif not b & 1 and start is not None:
+                    ranges.append((start * PAGE, (i - start) * PAGE)); start = None
+            if start is not None:
+                ranges.append((start * PAGE, (n - start) * PAGE))
+            return ranges, size
+        finally:
+            libc.munmap(addr, size)
+    finally:
+        os.close(fd)
+
+
+def load_state():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def record():
+    state, now, uid = load_state(), int(time.time()), desktop_uid()
+    if uid is None:
+        print("no desktop session"); return
+    for path in mapped_files(uid):
+        try:
+            st = os.stat(path)
+            if not os.path.isfile(path) or path.startswith(("/dev/", "/proc/", "/sys/", "/run/", "/tmp/", "/var/log/")):
+                continue
+            ranges, size = resident_ranges(path)
+        except OSError:
+            continue
+        if not ranges:
+            continue
+        old = state.get(path)
+        if old and old["size"] == size and old["mtime"] == int(st.st_mtime):
+            merged = dict(map(tuple, old["ranges"]))      # union, by start offset (good enough: ranges grow)
+            for off, ln in ranges:
+                merged[off] = max(ln, merged.get(off, 0))
+            ranges = sorted(merged.items())
+        state[path] = {"size": size, "mtime": int(st.st_mtime), "seen": now, "ranges": ranges}
+    state = {p: e for p, e in state.items() if now - e["seen"] < KEEP_S}
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE + ".new", "w") as f:
+        json.dump(state, f)
+    os.replace(STATE + ".new", STATE)
+    total = sum(ln for e in state.values() for _, ln in e["ranges"])
+    print(f"recorded {len(state)} files, {total >> 20} MB")
+
+
+def load():
+    avail = 0
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemAvailable:"):
+                avail = int(line.split()[1]) << 10
+    if avail < 2 * CAP:
+        print(f"skipped: only {avail >> 20} MB available"); return
+    done, files = 0, 0
+    # most recently seen first; within that, programs and libraries before data files
+    order = lambda kv: (-kv[1]["seen"], not kv[0].startswith(("/usr/", "/opt/")), kv[0])
+    for path, e in sorted(load_state().items(), key=order):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+        except OSError:
+            continue
+        try:
+            st = os.fstat(fd)
+            if st.st_size != e["size"] or int(st.st_mtime) != e["mtime"]:
+                continue                                  # updated since: its pages moved
+            for off, ln in e["ranges"]:
+                if done >= CAP:
+                    break
+                os.posix_fadvise(fd, off, ln, os.POSIX_FADV_WILLNEED)
+                done += ln
+            files += 1
+        finally:
+            os.close(fd)
+        if done >= CAP:
+            break
+    print(f"readahead of {done >> 20} MB in {files} files")
+
+
+{"record": record, "load": load}[sys.argv[1]]()

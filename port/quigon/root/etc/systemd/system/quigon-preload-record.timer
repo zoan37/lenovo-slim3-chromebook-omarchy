@@ -1,0 +1,9 @@
+[Unit]
+Description=Record the desktop apps' files in use every 15 minutes (for quigon-preload)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

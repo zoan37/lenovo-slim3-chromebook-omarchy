@@ -62,7 +62,7 @@ check_system() {
   else
     pass "running from $(findmnt -no SOURCE /) (not the internal disk)"
   fi
-  for u in seatd quigon-gpu-guard quigon-gpu-confirm.timer quigon-boot-good NetworkManager; do
+  for u in seatd quigon-gpu-guard quigon-gpu-confirm.timer quigon-boot-good NetworkManager quigon-preload.timer quigon-preload-record.timer; do
     systemctl is-enabled -q "$u" 2>/dev/null && pass "$u enabled" || fail "$u not enabled"
   done
   [[ -f /etc/systemd/system/seatd.service.d/novt.conf ]] && pass "seatd SEATD_VTBOUND=0 drop-in" || fail "seatd no-VT drop-in missing"

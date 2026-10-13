@@ -1,0 +1,8 @@
+[Unit]
+Description=Learned readahead 30 s after boot, once the desktop is up
+
+[Timer]
+OnBootSec=30s
+
+[Install]
+WantedBy=timers.target

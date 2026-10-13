@@ -1,0 +1,10 @@
+[Unit]
+Description=Record which parts of the desktop apps' files are in use (for quigon-preload)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/preload record
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+AllowedCPUs=0-5

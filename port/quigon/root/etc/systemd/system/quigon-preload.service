@@ -1,0 +1,11 @@
+[Unit]
+Description=Read the desktop apps' files into the page cache after boot (learned readahead)
+ConditionPathExists=/var/lib/quigon/preload.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/quigon/preload load
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+AllowedCPUs=0-5
