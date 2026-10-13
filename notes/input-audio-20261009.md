@@ -145,3 +145,12 @@ installed Qt (`quickshell --private-check-compat`) or falls behind Omarchy's ver
 `pacman -Syu` (pre-transaction hook); the package step ran with `OMARCHY_ALLOW_DIRECT_PACMAN=1`, Omarchy's documented
 bypass, then `omarchy update` for the rest. Also: pacman.conf has no inline comments (`pacman-conf IgnorePkg` listed
 every word of the old comment as an ignored package), so the note about the pins is on its own line now.
+
+After the reboot the bar was gone and notifications unstyled: Qt 6.12 added a QtQuick `Color` type that shadows
+Omarchy's `Color` singleton (`Color.bar` undefined everywhere). Omarchy's Quickshell patch rewrites `import QtQuick`
+to `import QtQuick 6.11`, but only when `shell.qml` starts with `//@ pragma OmarchyLoadPatch` (omarchy 51717f10b,
+2026-10-10), and the aarch64 omarchy 4.0.4-2 package predates that commit: Qt 6.12 reached the ARM repos before the
+matching shell. [`qt612-color-pragma.patch`](../port/quigon/root/usr/local/share/quigon/omarchy-patches/qt612-color-pragma.patch)
+adds the line via `quigon-omarchy-patches` (pacman hook after every omarchy update; reported as already applied once
+Omarchy ships it). Lesson: after a Qt minor upgrade, check the bar's log (`quickshell log -i <id>`) for
+`Cannot read property ... of undefined`, not just that the process runs.

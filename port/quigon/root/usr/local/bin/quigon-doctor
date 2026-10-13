@@ -233,7 +233,7 @@ check_system() {
   local pout
   pout=$(/usr/local/bin/quigon-omarchy-patches 2>&1)
   if grep -q "no longer applies" <<<"$pout"; then fail "Omarchy patch: $(grep "no longer applies" <<<"$pout" | head -1)"
-  else pass "Omarchy patches in place (lock screen wake key)"; fi
+  else pass "Omarchy patches in place (lock screen wake key, Qt 6.12 Color pragma)"; fi
   # a Wi-Fi profile pinned to one interface name breaks when the names swap: the USB dongle is wlan0 under mainline,
   # the built-in Wi-Fi is wlan0 under the ChromeOS kernel
   local pinned

@@ -1,0 +1,12 @@
+Qt 6.12 added a QtQuick Color type that shadows Omarchy's Color singleton: the bar, notifications and lock screen lose
+their theme colours (Color.bar etc. undefined). Omarchy's Quickshell 0.3.2-4 carries a workaround that rewrites
+"import QtQuick" to "import QtQuick 6.11", but only when shell.qml has this pragma: omarchy commit 51717f10b
+(2026-10-10), which the aarch64 omarchy 4.0.4-2 package doesn't include yet. Skipped once a release has it.
+
+--- a/shell/shell.qml
++++ b/shell/shell.qml
+@@ -1,3 +1,4 @@
++//@ pragma OmarchyLoadPatch
+ import QtQuick
+ import QtQml.Models
+ import Quickshell
